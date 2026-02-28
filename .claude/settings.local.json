@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(flutter create --org com.runcoach --platforms ios -t app running_coach_app 2>&1)",
+      "Bash(flutter pub get 2>&1)",
+      "Bash(flutter analyze 2>&1)",
+      "Bash(flutter test 2>&1)",
+      "Bash(flutter devices 2>&1)",
+      "Bash(xcrun simctl list devices available | grep -i \"iphone\" | head -10 2>&1)",
+      "Bash(xcode-select -p 2>&1)",
+      "Bash(ls -d /Applications/Xcode*.app 2>&1)",
+      "Bash(sudo xcode-select -s /Applications/Xcode.app/Contents/Developer 2>&1)",
+      "Bash(xcrun simctl boot 169FA930-5C5F-46E8-9620-2C645EC09258 2>&1 && open -a Simulator 2>&1)",
+      "Bash(flutter run -d 169FA930-5C5F-46E8-9620-2C645EC09258 2>&1)",
+      "Bash(xcrun simctl list runtimes 2>&1)",
+      "Bash(xcodebuild -version 2>&1)",
+      "Bash(flutter create --platforms macos . 2>&1)",
+      "Bash(flutter create --platforms macos --project-name running_coach_app . 2>&1)",
+      "Bash(flutter run -d macos 2>&1)",
+      "Bash(xcrun simctl list devices available \"iOS 26.2\" 2>&1)",
+      "Bash(xcrun simctl shutdown all 2>&1; xcrun simctl boot 8501B843-6CE4-4120-B307-4FA8B28B77E3 2>&1 && open -a Simulator 2>&1)",
+      "Bash(flutter run -d 8501B843-6CE4-4120-B307-4FA8B28B77E3 2>&1)"
+    ]
+  }
+}
