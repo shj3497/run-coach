@@ -49,6 +49,37 @@ class CoachingMessage {
         createdAt: DateTime.parse(json['created_at'] as String),
       );
 
+  CoachingMessage copyWith({
+    String? id,
+    String? userId,
+    String? planId,
+    String? weekId,
+    String? sessionId,
+    String? messageType,
+    String? title,
+    String? content,
+    String? llmModel,
+    Map<String, dynamic>? llmPromptSnapshot,
+    Map<String, dynamic>? tokenUsage,
+    bool? isRead,
+    DateTime? createdAt,
+  }) =>
+      CoachingMessage(
+        id: id ?? this.id,
+        userId: userId ?? this.userId,
+        planId: planId ?? this.planId,
+        weekId: weekId ?? this.weekId,
+        sessionId: sessionId ?? this.sessionId,
+        messageType: messageType ?? this.messageType,
+        title: title ?? this.title,
+        content: content ?? this.content,
+        llmModel: llmModel ?? this.llmModel,
+        llmPromptSnapshot: llmPromptSnapshot ?? this.llmPromptSnapshot,
+        tokenUsage: tokenUsage ?? this.tokenUsage,
+        isRead: isRead ?? this.isRead,
+        createdAt: createdAt ?? this.createdAt,
+      );
+
   Map<String, dynamic> toJson() => {
         'user_id': userId,
         'plan_id': planId,

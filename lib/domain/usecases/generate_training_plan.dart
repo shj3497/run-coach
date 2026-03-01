@@ -25,17 +25,22 @@ class GenerateTrainingPlan {
     required LLMProvider llmProvider,
   }) : _llmProvider = llmProvider;
 
+  /// 청크 단위 생성 시 주차 수
+  static const int _chunkSize = 8;
+
   /// 훈련표 생성 실행
   ///
   /// [input] 훈련표 생성에 필요한 입력 데이터
+  /// [onChunkProgress] 청크 진행 콜백 (current, total)
   /// 반환: [GenerateTrainingPlanResult] 생성된 훈련표 전체 데이터
   ///
   /// 예외:
   /// - [LLMException] LLM 호출 실패 시
   /// - [FormatException] LLM 응답 파싱 실패 시
   Future<GenerateTrainingPlanResult> execute(
-    GenerateTrainingPlanInput input,
-  ) async {
+    GenerateTrainingPlanInput input, {
+    void Function(int current, int total)? onChunkProgress,
+  }) async {
     // 1. VDOT -> 페이스 존 계산
     final paceZones = VdotCalculator.getPaceZonesStructured(input.vdotScore);
 
@@ -49,19 +54,21 @@ class GenerateTrainingPlan {
       periodization: periodization,
     );
 
-    // 4. LLM 호출
-    final llmResponse = await _callLLM(context);
+    // 4. 청크 단위 LLM 호출 (안정적인 전체 주차 생성)
+    final contextJson = const JsonEncoder.withIndent('  ').convert(context);
+    final chunkedResult = await _callLLMChunked(
+      contextJson,
+      input.totalWeeks,
+      onChunkProgress: onChunkProgress,
+    );
 
-    // 5. LLM 응답 파싱
-    final parsedResponse = _parseLLMResponse(llmResponse);
-
-    // 6. 모델 객체 생성
+    // 5. 모델 객체 생성
     final result = _buildResult(
       input: input,
       paceZones: paceZones,
-      parsedResponse: parsedResponse,
+      parsedResponse: chunkedResult.parsedResponse,
       llmContext: context,
-      llmResponse: llmResponse,
+      llmResponse: chunkedResult.aggregatedResponse,
     );
 
     return result;
@@ -90,8 +97,8 @@ class GenerateTrainingPlan {
 
     if (totalWeeks <= 8) {
       // 5~8주
-      final taper = 1;
-      final peak = 1;
+      const taper = 1;
+      const peak = 1;
       final base = (totalWeeks * 0.30).round().clamp(1, totalWeeks);
       final build = totalWeeks - base - peak - taper;
       return Periodization(
@@ -176,46 +183,98 @@ class GenerateTrainingPlan {
   }
 
   // ---------------------------------------------------------------------------
-  // LLM 호출
+  // 청크 단위 LLM 호출
   // ---------------------------------------------------------------------------
 
-  /// LLM에 훈련표 생성 요청
-  Future<LLMResponse> _callLLM(Map<String, dynamic> context) async {
-    final contextJson = const JsonEncoder.withIndent('  ').convert(context);
-    final userPrompt = LLMPrompts.trainingPlanUserPrompt(contextJson);
+  /// 청크 단위로 LLM을 호출하여 전체 훈련표를 안정적으로 생성
+  ///
+  /// LLM이 긴 훈련표(12주 이상)를 한 번에 생성하면 일부 주차만 생성하는
+  /// 문제가 있어, [_chunkSize]주 단위로 나누어 여러 번 호출합니다.
+  Future<_ChunkedLLMResult> _callLLMChunked(
+    String contextJson,
+    int totalWeeks, {
+    void Function(int current, int total)? onChunkProgress,
+  }) async {
+    final totalChunks = (totalWeeks / _chunkSize).ceil();
 
-    try {
-      final response = await _llmProvider.generateJson(
-        systemPrompt: LLMPrompts.trainingPlanSystemPrompt,
-        userPrompt: userPrompt,
-        temperature: 0.7,
-        maxTokens: 8000,
+    String planName = '';
+    String planOverview = '';
+    final allWeeks = <WeekResponse>[];
+    int totalPromptTokens = 0;
+    int totalCompletionTokens = 0;
+    String model = '';
+
+    for (var chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+      final startWeek = chunkIndex * _chunkSize + 1;
+      final endWeek = (startWeek + _chunkSize - 1).clamp(startWeek, totalWeeks);
+      final isFirstChunk = chunkIndex == 0;
+
+      onChunkProgress?.call(chunkIndex + 1, totalChunks);
+
+      final userPrompt = LLMPrompts.trainingPlanChunkPrompt(
+        contextJson: contextJson,
+        startWeek: startWeek,
+        endWeek: endWeek,
+        totalWeeks: totalWeeks,
+        includeOverview: isFirstChunk,
       );
-      return response;
-    } on LLMException {
-      rethrow;
-    } catch (e) {
-      throw LLMException(
-        message: 'LLM 훈련표 생성 실패',
-        originalError: e,
-      );
-    }
-  }
 
-  // ---------------------------------------------------------------------------
-  // LLM 응답 파싱
-  // ---------------------------------------------------------------------------
+      try {
+        final response = await _llmProvider.generateJson(
+          systemPrompt: LLMPrompts.trainingPlanSystemPrompt,
+          userPrompt: userPrompt,
+          temperature: 0.7,
+          maxTokens: 8000,
+        );
 
-  /// LLM JSON 응답을 TrainingPlanResponse로 파싱
-  TrainingPlanResponse _parseLLMResponse(LLMResponse response) {
-    try {
-      final json = jsonDecode(response.content) as Map<String, dynamic>;
-      return TrainingPlanResponse.fromJson(json);
-    } on FormatException {
-      rethrow;
-    } catch (e) {
-      throw FormatException('LLM 응답 JSON 파싱 실패: $e');
+        model = response.model;
+        if (response.tokenUsage != null) {
+          totalPromptTokens += response.tokenUsage!.promptTokens;
+          totalCompletionTokens += response.tokenUsage!.completionTokens;
+        }
+
+        final json = jsonDecode(response.content) as Map<String, dynamic>;
+
+        if (isFirstChunk) {
+          planName = json['plan_name'] as String? ?? '';
+          planOverview = json['plan_overview'] as String? ?? '';
+        }
+
+        final weeksJson = json['weeks'] as List<dynamic>? ?? [];
+        for (final w in weeksJson) {
+          allWeeks.add(WeekResponse.fromJson(w as Map<String, dynamic>));
+        }
+      } on LLMException {
+        rethrow;
+      } catch (e) {
+        throw LLMException(
+          message: 'LLM 훈련표 생성 실패 ($startWeek-$endWeek주차): $e',
+          originalError: e,
+        );
+      }
     }
+
+    if (allWeeks.isEmpty) {
+      throw const FormatException('훈련표에 주차 데이터가 없습니다.');
+    }
+
+    return _ChunkedLLMResult(
+      parsedResponse: TrainingPlanResponse(
+        planName: planName,
+        planOverview: planOverview,
+        weeks: allWeeks,
+      ),
+      aggregatedResponse: LLMResponse(
+        content: '(chunked: ${allWeeks.length} weeks in $totalChunks calls)',
+        model: model,
+        finishReason: 'stop',
+        tokenUsage: TokenUsage(
+          promptTokens: totalPromptTokens,
+          completionTokens: totalCompletionTokens,
+          totalTokens: totalPromptTokens + totalCompletionTokens,
+        ),
+      ),
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -542,4 +601,15 @@ class Periodization {
   @override
   String toString() =>
       'Periodization(base: $baseWeeks, build: $buildWeeks, peak: $peakWeeks, taper: $taperWeeks)';
+}
+
+/// 청크 단위 LLM 호출 결과 (내부용)
+class _ChunkedLLMResult {
+  final TrainingPlanResponse parsedResponse;
+  final LLMResponse aggregatedResponse;
+
+  const _ChunkedLLMResult({
+    required this.parsedResponse,
+    required this.aggregatedResponse,
+  });
 }

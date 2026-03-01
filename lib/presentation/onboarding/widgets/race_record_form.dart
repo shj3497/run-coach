@@ -1,5 +1,6 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_typography.dart';
@@ -158,9 +159,12 @@ class _RaceRecordFormState extends State<RaceRecordForm> {
                         itemExtent: 40,
                         diameterRatio: 1.2,
                         selectionOverlay: CupertinoPickerDefaultSelectionOverlay(
-                          background: AppColors.primary(context).withOpacity(0.08),
+                          background: AppColors.primary(context).withValues(alpha: 0.08),
                         ),
-                        onSelectedItemChanged: (i) => selectedYear = years[i],
+                        onSelectedItemChanged: (i) {
+                          HapticFeedback.selectionClick();
+                          selectedYear = years[i];
+                        },
                         children: years.map((y) {
                           return Center(
                             child: Text(
@@ -182,9 +186,12 @@ class _RaceRecordFormState extends State<RaceRecordForm> {
                         itemExtent: 40,
                         diameterRatio: 1.2,
                         selectionOverlay: CupertinoPickerDefaultSelectionOverlay(
-                          background: AppColors.primary(context).withOpacity(0.08),
+                          background: AppColors.primary(context).withValues(alpha: 0.08),
                         ),
-                        onSelectedItemChanged: (i) => selectedMonth = i + 1,
+                        onSelectedItemChanged: (i) {
+                          HapticFeedback.selectionClick();
+                          selectedMonth = i + 1;
+                        },
                         children: List.generate(12, (i) {
                           return Center(
                             child: Text(
@@ -206,9 +213,12 @@ class _RaceRecordFormState extends State<RaceRecordForm> {
                         itemExtent: 40,
                         diameterRatio: 1.2,
                         selectionOverlay: CupertinoPickerDefaultSelectionOverlay(
-                          background: AppColors.primary(context).withOpacity(0.08),
+                          background: AppColors.primary(context).withValues(alpha: 0.08),
                         ),
-                        onSelectedItemChanged: (i) => selectedDay = i + 1,
+                        onSelectedItemChanged: (i) {
+                          HapticFeedback.selectionClick();
+                          selectedDay = i + 1;
+                        },
                         children: List.generate(31, (i) {
                           return Center(
                             child: Text(

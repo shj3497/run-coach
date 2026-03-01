@@ -61,7 +61,7 @@ class SessionDetailScreen extends ConsumerWidget {
               // 날짜 + 주차 정보
               if (weekNumber != null)
                 Text(
-                  '${session.dayLabel}요일  |  ${weekNumber}주차',
+                  '${session.dayLabel}요일  |  $weekNumber주차',
                   style: AppTypography.body.copyWith(
                     color: AppColors.textSecondary,
                   ),
@@ -153,7 +153,7 @@ class SessionDetailScreen extends ConsumerWidget {
               context,
               icon: Icons.speed_rounded,
               label: '페이스',
-              value: '${session.targetPace}/km',
+              value: session.targetPace ?? '',
             ),
           ],
 
@@ -219,7 +219,7 @@ class SessionDetailScreen extends ConsumerWidget {
           Icon(
             Icons.thermostat_rounded,
             size: 24,
-            color: AppColors.textSecondary.withOpacity(0.5),
+            color: AppColors.textSecondary.withValues(alpha: 0.5),
           ),
           const SizedBox(width: AppSpacing.md),
           Expanded(
@@ -405,7 +405,7 @@ class SessionDetailScreen extends ConsumerWidget {
           Icon(
             Icons.fitness_center_rounded,
             size: 32,
-            color: AppColors.textSecondary.withOpacity(0.3),
+            color: AppColors.textSecondary.withValues(alpha: 0.3),
           ),
           const SizedBox(height: AppSpacing.sm),
           Text(

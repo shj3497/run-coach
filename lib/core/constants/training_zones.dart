@@ -79,7 +79,7 @@ class TrainingZone {
   });
 
   /// 배지 배경색 (20% 투명도)
-  Color get badgeBackground => color.withOpacity(0.2);
+  Color get badgeBackground => color.withValues(alpha: 0.2);
 }
 
 class TrainingZones {
@@ -118,42 +118,42 @@ class TrainingZones {
 
   static const TrainingZone interval = TrainingZone(
     type: TrainingZoneType.interval,
-    label: 'Interval',
+    label: '인터벌',
     shortLabel: '인터벌',
     color: intervalColor,
   );
 
   static const TrainingZone repetition = TrainingZone(
     type: TrainingZoneType.repetition,
-    label: 'Repetition',
-    shortLabel: '반복',
+    label: '반복달리기',
+    shortLabel: '반복달리기',
     color: repetitionColor,
   );
 
   static const TrainingZone longRun = TrainingZone(
     type: TrainingZoneType.longRun,
-    label: 'Long Run',
+    label: '장거리런',
     shortLabel: '장거리런',
     color: longRunColor,
   );
 
   static const TrainingZone recovery = TrainingZone(
     type: TrainingZoneType.recovery,
-    label: 'Recovery',
+    label: '회복런',
     shortLabel: '회복런',
     color: recoveryColor,
   );
 
   static const TrainingZone crossTraining = TrainingZone(
     type: TrainingZoneType.crossTraining,
-    label: 'Cross Training',
-    shortLabel: '크로스',
+    label: '크로스트레이닝',
+    shortLabel: '크로스트레이닝',
     color: crossTrainingColor,
   );
 
   static const TrainingZone rest = TrainingZone(
     type: TrainingZoneType.rest,
-    label: 'Rest',
+    label: '휴식',
     shortLabel: '휴식',
     color: restColor,
   );

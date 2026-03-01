@@ -42,13 +42,19 @@ class StatCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.baseline,
             textBaseline: TextBaseline.alphabetic,
             children: [
-              Text(
-                value,
-                style: (useLargeStyle
-                        ? AppTypography.statsLarge
-                        : AppTypography.statsMedium)
-                    .copyWith(
-                  color: AppColors.textPrimary(context),
+              Flexible(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    value,
+                    style: (useLargeStyle
+                            ? AppTypography.statsLarge
+                            : AppTypography.statsMedium)
+                        .copyWith(
+                      color: AppColors.textPrimary(context),
+                    ),
+                  ),
                 ),
               ),
               if (unit != null) ...[

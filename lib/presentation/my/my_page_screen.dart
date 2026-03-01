@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/theme/app_colors.dart';
+import '../common/widgets/skeleton.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/theme/app_typography.dart';
+import '../providers/strava_auth_provider.dart';
 import 'providers/my_page_provider.dart';
 
 /// C-4 마이페이지
@@ -13,6 +15,7 @@ class MyPageScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final profileAsync = ref.watch(myPageProfileProvider);
+    final isStravaConnected = ref.watch(isStravaConnectedProvider);
 
     return Scaffold(
       backgroundColor: AppColors.background(context),
@@ -33,10 +36,7 @@ class MyPageScreen extends ConsumerWidget {
 
               // 프로필 헤더
               profileAsync.when(
-                loading: () => const SizedBox(
-                  height: 120,
-                  child: Center(child: CircularProgressIndicator()),
-                ),
+                loading: () => const MyPageSkeleton(),
                 error: (_, __) => const SizedBox.shrink(),
                 data: (profile) => _buildProfileHeader(context, profile),
               ),
@@ -79,9 +79,17 @@ class MyPageScreen extends ConsumerWidget {
                 items: [
                   _MenuItem(
                     icon: Icons.link_rounded,
-                    label: 'Strava 연동 관리',
+                    label: isStravaConnected
+                        ? 'Strava 연동 해제'
+                        : 'Strava 연동',
                     onTap: () {
-                      // TODO: D-8 설정 (Phase 6)
+                      if (isStravaConnected) {
+                        _showStravaDisconnectDialog(context, ref);
+                      } else {
+                        ref
+                            .read(stravaAuthProvider.notifier)
+                            .startOAuthFlow();
+                      }
                     },
                   ),
                   _MenuItem(
@@ -169,7 +177,7 @@ class MyPageScreen extends ConsumerWidget {
               width: 72,
               height: 72,
               decoration: BoxDecoration(
-                color: AppColors.primary(context).withOpacity(0.1),
+                color: AppColors.primary(context).withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
               child: Icon(
@@ -197,7 +205,7 @@ class MyPageScreen extends ConsumerWidget {
                   vertical: 6,
                 ),
                 decoration: BoxDecoration(
-                  color: AppColors.primary(context).withOpacity(0.1),
+                  color: AppColors.primary(context).withValues(alpha: 0.1),
                   borderRadius:
                       BorderRadius.circular(AppSpacing.badgeRadius),
                 ),
@@ -286,10 +294,59 @@ class MyPageScreen extends ConsumerWidget {
               Icon(
                 Icons.chevron_right_rounded,
                 size: 20,
-                color: AppColors.textSecondary.withOpacity(0.5),
+                color: AppColors.textSecondary.withValues(alpha: 0.5),
               ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// Strava 연동 해제 확인 다이얼로그
+  void _showStravaDisconnectDialog(BuildContext context, WidgetRef ref) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: AppColors.surface(context),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppSpacing.cardRadius),
+        ),
+        title: Text(
+          'Strava 연동 해제',
+          style: AppTypography.h3.copyWith(
+            color: AppColors.textPrimary(context),
+          ),
+        ),
+        content: Text(
+          'Strava 연동을 해제하시겠습니까?\n해제 후에도 기존 동기화된 기록은 유지됩니다.',
+          style: AppTypography.body.copyWith(
+            color: AppColors.textSecondary,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: Text(
+              '취소',
+              style: AppTypography.body.copyWith(
+                color: AppColors.textSecondary,
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.of(dialogContext).pop();
+              ref.read(stravaAuthProvider.notifier).disconnect();
+            },
+            child: Text(
+              '연동 해제',
+              style: AppTypography.body.copyWith(
+                color: AppColors.error,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -1,39 +1,102 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/constants/training_zones.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/theme/app_typography.dart';
+import '../../core/utils/pace_formatter.dart';
+import '../../core/utils/time_formatter.dart';
+import '../../data/models/workout_log.dart';
 import '../common/widgets/coaching_message_card.dart';
+import '../common/widgets/skeleton.dart';
 import '../common/widgets/progress_bar.dart';
 import '../common/widgets/training_session_card.dart';
 import '../common/widgets/weather_card.dart';
+import '../providers/strava_sync_provider.dart';
 import 'providers/home_provider.dart';
 
 /// C-1 홈 화면 (오늘의 훈련)
-class HomeScreen extends ConsumerWidget {
+class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends ConsumerState<HomeScreen> {
+  bool _syncTriggered = false;
+
+  @override
+  Widget build(BuildContext context) {
     final homeAsync = ref.watch(homeStateProvider);
+    final syncState = ref.watch(stravaSyncProvider);
+
+    // homeState 로드 완료 시 동기화 트리거
+    if (homeAsync.hasValue && !_syncTriggered) {
+      _syncTriggered = true;
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        ref.read(stravaSyncProvider.notifier).syncIfNeeded();
+      });
+    }
 
     return Scaffold(
       backgroundColor: AppColors.background(context),
-      body: homeAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (error, _) => Center(
-          child: Text(
-            '오류가 발생했습니다',
-            style: AppTypography.body.copyWith(
-              color: AppColors.textSecondary,
+      body: Column(
+        children: [
+          // 동기화 중 표시
+          if (syncState.isSyncing)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.screenPadding,
+                vertical: AppSpacing.xs,
+              ),
+              color: AppColors.primary(context).withValues(alpha: 0.1),
+              child: SafeArea(
+                bottom: false,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: AppColors.primary(context),
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    Text(
+                      '데이터 동기화 중...',
+                      style: AppTypography.bodySmall.copyWith(
+                        color: AppColors.primary(context),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          Expanded(
+            child: homeAsync.when(
+              loading: () => const SingleChildScrollView(
+                child: HomeScreenSkeleton(),
+              ),
+              error: (error, _) => Center(
+                child: Text(
+                  '오류가 발생했습니다',
+                  style: AppTypography.body.copyWith(
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ),
+              data: (state) => state.hasPlan
+                  ? _buildActiveContent(context, state)
+                  : _buildEmptyContent(context),
             ),
           ),
-        ),
-        data: (state) => state.hasPlan
-            ? _buildActiveContent(context, state)
-            : _buildEmptyContent(context),
+        ],
       ),
     );
   }
@@ -80,16 +143,7 @@ class HomeScreen extends ConsumerWidget {
             const SizedBox(height: AppSpacing.sm),
 
             if (state.todaySession != null)
-              TrainingSessionCard(
-                zone: TrainingZones.fromType(state.todaySession!.zoneType),
-                title: state.todaySession!.title,
-                targetPace: state.todaySession!.targetPace,
-                estimatedTime: state.todaySession!.estimatedTime,
-                status: SessionStatus.pending,
-                onTap: () {
-                  context.push('/plan/session/${state.todaySession!.id}');
-                },
-              )
+              _buildTodaySessionCard(context, state.todaySession!)
             else
               _buildNoSessionCard(context),
 
@@ -123,7 +177,7 @@ class HomeScreen extends ConsumerWidget {
                     const SizedBox(height: AppSpacing.md),
                     ProgressBar(
                       leftLabel:
-                          '${state.weeklyProgress!.completedKm.toStringAsFixed(0)}km / ${state.weeklyProgress!.totalKm.toStringAsFixed(0)}km',
+                          '${state.weeklyProgress!.completedKm.toStringAsFixed(1)}km / ${state.weeklyProgress!.totalKm.toStringAsFixed(1)}km',
                       rightLabel:
                           '${(state.weeklyProgress!.distanceProgress * 100).toInt()}%',
                       progress: state.weeklyProgress!.distanceProgress,
@@ -133,6 +187,19 @@ class HomeScreen extends ConsumerWidget {
               ),
 
             const SizedBox(height: AppSpacing.xl),
+
+            // 최근 운동 기록 섹션
+            if (state.recentWorkouts.isNotEmpty) ...[
+              Text(
+                '최근 운동',
+                style: AppTypography.h2.copyWith(
+                  color: AppColors.textPrimary(context),
+                ),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              _buildRecentWorkouts(context, state.recentWorkouts),
+              const SizedBox(height: AppSpacing.xl),
+            ],
 
             // 코칭 메시지 섹션
             Text(
@@ -147,9 +214,6 @@ class HomeScreen extends ConsumerWidget {
               CoachingMessageCard(
                 message: state.latestCoaching!.message,
                 timestamp: _formatTimestamp(state.latestCoaching!.timestamp),
-                onTap: () {
-                  // TODO: D-3 주간 리뷰로 이동
-                },
               )
             else
               _buildNoCoachingCard(context),
@@ -157,6 +221,226 @@ class HomeScreen extends ConsumerWidget {
             const SizedBox(height: AppSpacing.xxl),
           ],
         ),
+      ),
+    );
+  }
+
+  /// 오늘의 훈련 카드 (완료 여부에 따라 다르게 표시)
+  Widget _buildTodaySessionCard(
+    BuildContext context,
+    TodaySession session,
+  ) {
+    final zone = TrainingZones.fromType(session.zoneType);
+
+    if (session.isCompleted && session.workoutLog != null) {
+      // 완료된 경우: 실제 기록 표시
+      return _buildCompletedSessionCard(context, session, zone);
+    }
+
+    // 미완료: 기존 세션 카드
+    return TrainingSessionCard(
+      zone: zone,
+      title: session.title,
+      targetPace: session.targetPace,
+      estimatedTime: session.estimatedTime,
+      status: session.isCompleted
+          ? SessionStatus.completed
+          : SessionStatus.pending,
+      onTap: () {
+        context.push('/plan/session/${session.id}');
+      },
+    );
+  }
+
+  /// 완료된 세션: 실제 기록 표시
+  Widget _buildCompletedSessionCard(
+    BuildContext context,
+    TodaySession session,
+    TrainingZone zone,
+  ) {
+    final workout = session.workoutLog!;
+    final paceStr = workout.avgPaceSecondsPerKm != null
+        ? PaceFormatter.toDisplay(workout.avgPaceSecondsPerKm!)
+        : '-';
+    final durationStr = TimeFormatter.toReadable(workout.durationSeconds);
+
+    return GestureDetector(
+      onTap: () {
+        context.push('/records/${workout.id}');
+      },
+      child: Container(
+        padding: const EdgeInsets.all(AppSpacing.cardPadding),
+        decoration: BoxDecoration(
+          color: AppColors.surface(context),
+          borderRadius: BorderRadius.circular(AppSpacing.cardRadius),
+        ),
+        child: Row(
+          children: [
+            // 좌측 컬러 바
+            Container(
+              width: 4,
+              height: 72,
+              decoration: BoxDecoration(
+                color: zone.color,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(width: AppSpacing.md),
+            // 내용
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppColors.success.withValues(alpha: 0.15),
+                          borderRadius:
+                              BorderRadius.circular(AppSpacing.badgeRadius),
+                        ),
+                        child: Text(
+                          '완료',
+                          style: AppTypography.bodySmall.copyWith(
+                            color: AppColors.success,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                      Text(
+                        session.title,
+                        style: AppTypography.h3.copyWith(
+                          color: AppColors.textPrimary(context),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  // 실제 기록 표시
+                  Row(
+                    children: [
+                      _buildMiniStat(
+                        context,
+                        '${workout.distanceKm.toStringAsFixed(1)}km',
+                      ),
+                      const SizedBox(width: AppSpacing.md),
+                      _buildMiniStat(context, durationStr),
+                      const SizedBox(width: AppSpacing.md),
+                      _buildMiniStat(context, paceStr),
+                    ],
+                  ),
+                  if (workout.avgHeartRate != null) ...[
+                    const SizedBox(height: AppSpacing.xs),
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.favorite,
+                          color: AppColors.error,
+                          size: 14,
+                        ),
+                        const SizedBox(width: AppSpacing.xs),
+                        Text(
+                          '${workout.avgHeartRate}bpm',
+                          style: AppTypography.bodySmall.copyWith(
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            // 완료 아이콘
+            const Icon(
+              Icons.check_circle,
+              color: AppColors.success,
+              size: 24,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 미니 통계 텍스트
+  Widget _buildMiniStat(BuildContext context, String text) {
+    return Text(
+      text,
+      style: AppTypography.body.copyWith(
+        color: AppColors.textPrimary(context),
+        fontWeight: FontWeight.w500,
+      ),
+    );
+  }
+
+  /// 최근 운동 기록 리스트 (간략히 표시)
+  Widget _buildRecentWorkouts(
+    BuildContext context,
+    List<WorkoutLog> workouts,
+  ) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.cardPadding),
+      decoration: BoxDecoration(
+        color: AppColors.surface(context),
+        borderRadius: BorderRadius.circular(AppSpacing.cardRadius),
+      ),
+      child: Column(
+        children: workouts.asMap().entries.map((entry) {
+          final index = entry.key;
+          final workout = entry.value;
+          final date = workout.workoutDate;
+          final dateStr =
+              '${date.month}/${date.day}(${_weekdayShort(date.weekday)})';
+          final paceStr = workout.avgPaceSecondsPerKm != null
+              ? PaceFormatter.toMMSS(workout.avgPaceSecondsPerKm!)
+              : '-';
+
+          return Column(
+            children: [
+              if (index > 0)
+                Divider(
+                  color: AppColors.divider(context),
+                  height: AppSpacing.lg,
+                ),
+              GestureDetector(
+                onTap: () {
+                  context.push('/records/${workout.id}');
+                },
+                behavior: HitTestBehavior.opaque,
+                child: Row(
+                  children: [
+                    Text(
+                      dateStr,
+                      style: AppTypography.bodySmall.copyWith(
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.md),
+                    Expanded(
+                      child: Text(
+                        '${workout.distanceKm.toStringAsFixed(1)}km  $paceStr/km',
+                        style: AppTypography.body.copyWith(
+                          color: AppColors.textPrimary(context),
+                        ),
+                      ),
+                    ),
+                    const Icon(
+                      Icons.chevron_right_rounded,
+                      color: AppColors.textSecondary,
+                      size: 20,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          );
+        }).toList(),
       ),
     );
   }
@@ -173,7 +457,7 @@ class HomeScreen extends ConsumerWidget {
               Icon(
                 Icons.directions_run_rounded,
                 size: 80,
-                color: AppColors.primary(context).withOpacity(0.3),
+                color: AppColors.primary(context).withValues(alpha: 0.3),
               ),
               const SizedBox(height: AppSpacing.xl),
               Text(
@@ -229,7 +513,7 @@ class HomeScreen extends ConsumerWidget {
           Icon(
             Icons.event_available_rounded,
             size: 32,
-            color: AppColors.textSecondary.withOpacity(0.5),
+            color: AppColors.textSecondary.withValues(alpha: 0.5),
           ),
           const SizedBox(width: AppSpacing.md),
           Expanded(
@@ -257,7 +541,7 @@ class HomeScreen extends ConsumerWidget {
           Icon(
             Icons.smart_toy_outlined,
             size: 24,
-            color: AppColors.textSecondary.withOpacity(0.5),
+            color: AppColors.textSecondary.withValues(alpha: 0.5),
           ),
           const SizedBox(width: AppSpacing.md),
           Expanded(
@@ -290,5 +574,10 @@ class HomeScreen extends ConsumerWidget {
     if (diff.inHours < 24) return '${diff.inHours}시간 전';
     if (diff.inDays < 7) return '${diff.inDays}일 전';
     return '${timestamp.month}/${timestamp.day}';
+  }
+
+  String _weekdayShort(int weekday) {
+    const days = ['월', '화', '수', '목', '금', '토', '일'];
+    return days[weekday - 1];
   }
 }

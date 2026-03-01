@@ -1,5 +1,6 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_typography.dart';
@@ -174,9 +175,12 @@ class _TimePickerFieldState extends State<TimePickerField> {
       itemExtent: 40,
       diameterRatio: 1.2,
       selectionOverlay: CupertinoPickerDefaultSelectionOverlay(
-        background: AppColors.primary(context).withOpacity(0.08),
+        background: AppColors.primary(context).withValues(alpha: 0.08),
       ),
-      onSelectedItemChanged: onChanged,
+      onSelectedItemChanged: (i) {
+        HapticFeedback.selectionClick();
+        onChanged(i);
+      },
       children: List.generate(maxValue + 1, (i) {
         return Center(
           child: Text(

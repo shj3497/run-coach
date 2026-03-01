@@ -1,40 +1,19 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/training_zones.dart';
+import '../../../data/models/training_plan.dart' as db;
+import '../../../data/models/training_session.dart';
+import '../../../data/repositories/plan_repository.dart';
+import '../../auth/providers/auth_providers.dart';
 import '../../common/widgets/training_session_card.dart';
+import '../../providers/data_providers.dart';
 
-// ─── Mock Data Models ───
+// ─── UI View Models ───
 
-/// 훈련 플랜 데이터
-class TrainingPlan {
-  final String id;
-  final String name;
-  final String status; // active, completed, cancelled
-  final int totalWeeks;
-  final double? goalDistanceKm;
-  final int? goalTimeSeconds;
-  final double? vdotAtCreation;
-  final DateTime startDate;
-  final DateTime endDate;
-  final Map<TrainingZoneType, String>? paceZones;
-
-  const TrainingPlan({
-    required this.id,
-    required this.name,
-    required this.status,
-    required this.totalWeeks,
-    this.goalDistanceKm,
-    this.goalTimeSeconds,
-    this.vdotAtCreation,
-    required this.startDate,
-    required this.endDate,
-    this.paceZones,
-  });
-}
-
-/// 주차 데이터
+/// 주차 데이터 (UI 뷰모델)
 class WeekData {
+  final String id;
   final int weekNumber;
-  final String phase; // base, build, peak, taper
+  final String phase;
   final DateTime startDate;
   final DateTime endDate;
   final double targetKm;
@@ -42,6 +21,7 @@ class WeekData {
   final List<DaySession> sessions;
 
   const WeekData({
+    required this.id,
     required this.weekNumber,
     required this.phase,
     required this.startDate,
@@ -69,10 +49,10 @@ class WeekData {
   double get progress => targetKm > 0 ? completedKm / targetKm : 0.0;
 }
 
-/// 일별 훈련 세션 데이터
+/// 일별 훈련 세션 데이터 (UI 뷰모델)
 class DaySession {
   final String id;
-  final int dayOfWeek; // 1=월 ~ 7=일
+  final int dayOfWeek;
   final TrainingZoneType zoneType;
   final String title;
   final double? distanceKm;
@@ -120,7 +100,7 @@ class DaySession {
 // ─── 플랜 화면 상태 ───
 
 class PlanScreenState {
-  final TrainingPlan? activePlan;
+  final db.TrainingPlan? activePlan;
   final int currentWeekIndex;
   final List<WeekData> weeks;
   final bool isLoading;
@@ -142,7 +122,7 @@ class PlanScreenState {
   bool get hasPlan => activePlan != null;
 
   PlanScreenState copyWith({
-    TrainingPlan? activePlan,
+    db.TrainingPlan? activePlan,
     int? currentWeekIndex,
     List<WeekData>? weeks,
     bool? isLoading,
@@ -160,185 +140,153 @@ class PlanScreenState {
 // ─── Notifier ───
 
 class PlanNotifier extends StateNotifier<PlanScreenState> {
-  PlanNotifier() : super(const PlanScreenState(isLoading: true)) {
-    _loadMockData();
+  final PlanRepository _planRepo;
+  final String? _userId;
+
+  PlanNotifier({
+    required PlanRepository planRepo,
+    required String? userId,
+  })  : _planRepo = planRepo,
+        _userId = userId,
+        super(const PlanScreenState(isLoading: true)) {
+    _loadRealData();
   }
 
-  void _loadMockData() {
-    final now = DateTime.now();
-    final weekStart = now.subtract(Duration(days: now.weekday - 1));
+  Future<void> _loadRealData() async {
+    if (_userId == null) {
+      state = const PlanScreenState(isLoading: false);
+      return;
+    }
 
-    final mockPlan = TrainingPlan(
-      id: 'mock-plan-1',
-      name: '2026 서울마라톤 준비',
-      status: 'active',
-      totalWeeks: 12,
-      goalDistanceKm: 42.195,
-      goalTimeSeconds: 14400, // 4시간
-      vdotAtCreation: 42.1,
-      startDate: now.subtract(const Duration(days: 14)),
-      endDate: now.add(const Duration(days: 70)),
-      paceZones: {
-        TrainingZoneType.easy: '6:00-6:30',
-        TrainingZoneType.marathon: '5:30-5:45',
-        TrainingZoneType.threshold: '5:00-5:10',
-        TrainingZoneType.interval: '4:30-4:45',
-        TrainingZoneType.repetition: '4:00-4:15',
-      },
+    try {
+      // 활성 플랜 조회
+      final plan = await _planRepo.getActivePlan(_userId);
+      if (plan == null) {
+        state = const PlanScreenState(isLoading: false);
+        return;
+      }
+
+      // 주차 목록 조회
+      final dbWeeks = await _planRepo.getWeeksByPlan(plan.id);
+
+      // 현재 주차 인덱스 계산 (날짜 기반)
+      final today = DateTime.now();
+      int currentWeekIdx = 0; // 기본값: 첫 주차
+      for (int i = 0; i < dbWeeks.length; i++) {
+        if (!today.isBefore(dbWeeks[i].startDate) &&
+            !today.isAfter(dbWeeks[i].endDate.add(const Duration(days: 1)))) {
+          currentWeekIdx = i;
+          break;
+        }
+      }
+      // 모든 주차가 지난 경우에만 마지막 주차 선택
+      if (dbWeeks.isNotEmpty && today.isAfter(dbWeeks.last.endDate)) {
+        currentWeekIdx = dbWeeks.length - 1;
+      }
+
+      // 각 주차의 세션을 로드하여 WeekData로 변환
+      final weeks = <WeekData>[];
+      for (final dbWeek in dbWeeks) {
+        final dbSessions = await _planRepo.getSessionsByWeek(dbWeek.id);
+        final sessions = dbSessions.map(_convertSession).toList();
+
+        // 완료된 세션의 거리 합산
+        double completedKm = 0;
+        for (final s in dbSessions) {
+          if (s.status == 'completed') {
+            completedKm += s.targetDistanceKm ?? 0.0;
+          }
+        }
+
+        weeks.add(WeekData(
+          id: dbWeek.id,
+          weekNumber: dbWeek.weekNumber,
+          phase: dbWeek.phase,
+          startDate: dbWeek.startDate,
+          endDate: dbWeek.endDate,
+          targetKm: dbWeek.targetDistanceKm ?? 0,
+          completedKm: completedKm,
+          sessions: sessions,
+        ));
+      }
+
+      state = PlanScreenState(
+        activePlan: plan,
+        currentWeekIndex: currentWeekIdx,
+        weeks: weeks,
+        isLoading: false,
+      );
+    } catch (e) {
+      state = const PlanScreenState(
+        isLoading: false,
+        error: '플랜을 불러오는데 실패했습니다',
+      );
+    }
+  }
+
+  /// DB TrainingSession → UI DaySession 변환
+  DaySession _convertSession(TrainingSession s) {
+    final zoneType = trainingZoneTypeFromDbString(s.sessionType);
+    final status = _convertStatus(s.status);
+
+    return DaySession(
+      id: s.id,
+      dayOfWeek: s.dayOfWeek,
+      zoneType: zoneType,
+      title: s.title,
+      distanceKm: s.targetDistanceKm,
+      targetPace: s.targetPace,
+      estimatedTime: s.targetDurationMinutes != null
+          ? '${s.targetDurationMinutes}분'
+          : null,
+      status: status,
+      description: s.description,
+      workoutDetail: s.workoutDetail,
     );
+  }
 
-    final mockWeeks = <WeekData>[
-      // 1주차 (완료)
-      WeekData(
-        weekNumber: 1,
-        phase: 'base',
-        startDate: weekStart.subtract(const Duration(days: 14)),
-        endDate: weekStart.subtract(const Duration(days: 8)),
-        targetKm: 30,
-        completedKm: 28,
-        sessions: [
-          const DaySession(
-            id: 'w1-1', dayOfWeek: 1, zoneType: TrainingZoneType.easy,
-            title: '이지런 6km', distanceKm: 6, targetPace: '6:00-6:30',
-            estimatedTime: '36-39분', status: SessionStatus.completed,
-          ),
-          const DaySession(
-            id: 'w1-2', dayOfWeek: 2, zoneType: TrainingZoneType.rest,
-            title: '휴식', status: SessionStatus.rest,
-          ),
-          const DaySession(
-            id: 'w1-3', dayOfWeek: 3, zoneType: TrainingZoneType.threshold,
-            title: '템포런 5km', distanceKm: 5, targetPace: '5:00-5:10',
-            estimatedTime: '25-26분', status: SessionStatus.completed,
-          ),
-          const DaySession(
-            id: 'w1-4', dayOfWeek: 4, zoneType: TrainingZoneType.rest,
-            title: '휴식', status: SessionStatus.rest,
-          ),
-          const DaySession(
-            id: 'w1-5', dayOfWeek: 5, zoneType: TrainingZoneType.easy,
-            title: '이지런 6km', distanceKm: 6, targetPace: '6:00-6:30',
-            estimatedTime: '36-39분', status: SessionStatus.completed,
-          ),
-          const DaySession(
-            id: 'w1-6', dayOfWeek: 6, zoneType: TrainingZoneType.longRun,
-            title: '장거리런 12km', distanceKm: 12, targetPace: '6:00-6:30',
-            estimatedTime: '72-78분', status: SessionStatus.completed,
-          ),
-          const DaySession(
-            id: 'w1-7', dayOfWeek: 7, zoneType: TrainingZoneType.rest,
-            title: '휴식', status: SessionStatus.rest,
-          ),
-        ],
-      ),
-      // 2주차 (완료)
-      WeekData(
-        weekNumber: 2,
-        phase: 'base',
-        startDate: weekStart.subtract(const Duration(days: 7)),
-        endDate: weekStart.subtract(const Duration(days: 1)),
-        targetKm: 34,
-        completedKm: 32,
-        sessions: [
-          const DaySession(
-            id: 'w2-1', dayOfWeek: 1, zoneType: TrainingZoneType.easy,
-            title: '이지런 7km', distanceKm: 7, targetPace: '6:00-6:30',
-            estimatedTime: '42-46분', status: SessionStatus.completed,
-          ),
-          const DaySession(
-            id: 'w2-2', dayOfWeek: 2, zoneType: TrainingZoneType.rest,
-            title: '휴식', status: SessionStatus.rest,
-          ),
-          const DaySession(
-            id: 'w2-3', dayOfWeek: 3, zoneType: TrainingZoneType.interval,
-            title: '인터벌 6x800m', distanceKm: 8, targetPace: '4:30-4:45',
-            estimatedTime: '45-50분', status: SessionStatus.completed,
-            workoutDetail: {
-              'warmup': {'distance_km': 1.5, 'pace': '6:00-6:30'},
-              'intervals': [
-                {'reps': 6, 'distance_m': 800, 'pace': '4:30-4:45', 'rest_m': 400, 'rest_pace': '6:30-7:00'},
-              ],
-              'cooldown': {'distance_km': 1.5, 'pace': '6:00-6:30'},
-            },
-          ),
-          const DaySession(
-            id: 'w2-4', dayOfWeek: 4, zoneType: TrainingZoneType.rest,
-            title: '휴식', status: SessionStatus.rest,
-          ),
-          const DaySession(
-            id: 'w2-5', dayOfWeek: 5, zoneType: TrainingZoneType.easy,
-            title: '이지런 7km', distanceKm: 7, targetPace: '6:00-6:30',
-            estimatedTime: '42-46분', status: SessionStatus.completed,
-          ),
-          const DaySession(
-            id: 'w2-6', dayOfWeek: 6, zoneType: TrainingZoneType.longRun,
-            title: '장거리런 14km', distanceKm: 14, targetPace: '6:00-6:30',
-            estimatedTime: '84-91분', status: SessionStatus.missed,
-          ),
-          const DaySession(
-            id: 'w2-7', dayOfWeek: 7, zoneType: TrainingZoneType.rest,
-            title: '휴식', status: SessionStatus.rest,
-          ),
-        ],
-      ),
-      // 3주차 (현재)
-      WeekData(
-        weekNumber: 3,
-        phase: 'build',
-        startDate: weekStart,
-        endDate: weekStart.add(const Duration(days: 6)),
-        targetKm: 38,
-        completedKm: 16,
-        sessions: [
-          const DaySession(
-            id: 'w3-1', dayOfWeek: 1, zoneType: TrainingZoneType.easy,
-            title: '이지런 8km', distanceKm: 8, targetPace: '6:00-6:30',
-            estimatedTime: '48-52분', status: SessionStatus.completed,
-          ),
-          const DaySession(
-            id: 'w3-2', dayOfWeek: 2, zoneType: TrainingZoneType.rest,
-            title: '휴식', status: SessionStatus.rest,
-          ),
-          const DaySession(
-            id: 'w3-3', dayOfWeek: 3, zoneType: TrainingZoneType.interval,
-            title: '인터벌 6x800m', distanceKm: 8, targetPace: '4:30-4:45',
-            estimatedTime: '45-50분', status: SessionStatus.completed,
-            workoutDetail: {
-              'warmup': {'distance_km': 1.5, 'pace': '6:00-6:30'},
-              'intervals': [
-                {'reps': 6, 'distance_m': 800, 'pace': '4:30-4:45', 'rest_m': 400, 'rest_pace': '6:30-7:00'},
-              ],
-              'cooldown': {'distance_km': 1.5, 'pace': '6:00-6:30'},
-            },
-          ),
-          const DaySession(
-            id: 'w3-4', dayOfWeek: 4, zoneType: TrainingZoneType.rest,
-            title: '휴식', status: SessionStatus.rest,
-          ),
-          const DaySession(
-            id: 'w3-5', dayOfWeek: 5, zoneType: TrainingZoneType.threshold,
-            title: '템포런 6km', distanceKm: 6, targetPace: '5:00-5:10',
-            estimatedTime: '30-31분', status: SessionStatus.pending,
-          ),
-          const DaySession(
-            id: 'w3-6', dayOfWeek: 6, zoneType: TrainingZoneType.longRun,
-            title: '장거리런 16km', distanceKm: 16, targetPace: '6:00-6:30',
-            estimatedTime: '96-104분', status: SessionStatus.pending,
-          ),
-          const DaySession(
-            id: 'w3-7', dayOfWeek: 7, zoneType: TrainingZoneType.rest,
-            title: '휴식', status: SessionStatus.rest,
-          ),
-        ],
-      ),
-    ];
+  SessionStatus _convertStatus(String dbStatus) {
+    switch (dbStatus) {
+      case 'completed':
+        return SessionStatus.completed;
+      case 'missed':
+        return SessionStatus.missed;
+      case 'skipped':
+        return SessionStatus.skipped;
+      case 'partial':
+        return SessionStatus.partial;
+      case 'rest':
+        return SessionStatus.rest;
+      default:
+        return SessionStatus.pending;
+    }
+  }
 
-    state = PlanScreenState(
-      activePlan: mockPlan,
-      currentWeekIndex: 2, // 현재 3주차
-      weeks: mockWeeks,
-      isLoading: false,
-    );
+  /// 활성 플랜 전환 (다른 플랜을 active로 설정)
+  Future<void> switchActivePlan(String newPlanId) async {
+    final currentPlan = state.activePlan;
+    if (currentPlan == null || currentPlan.id == newPlanId) return;
+
+    state = state.copyWith(isLoading: true);
+    try {
+      // 1) 현재 active 플랜 → upcoming (비활성화 먼저)
+      await _planRepo.updatePlanStatus(currentPlan.id, 'upcoming');
+      // 2) 선택된 플랜 → active
+      await _planRepo.updatePlanStatus(newPlanId, 'active');
+      // 3) 새 플랜 데이터 로드
+      await _loadRealData();
+    } catch (e) {
+      state = state.copyWith(
+        isLoading: false,
+        error: '플랜 전환에 실패했습니다',
+      );
+    }
+  }
+
+  /// 데이터 새로고침
+  Future<void> refresh() async {
+    state = state.copyWith(isLoading: true);
+    await _loadRealData();
   }
 
   void goToPreviousWeek() {
@@ -364,7 +312,10 @@ class PlanNotifier extends StateNotifier<PlanScreenState> {
 
 final planProvider =
     StateNotifierProvider<PlanNotifier, PlanScreenState>((ref) {
-  return PlanNotifier();
+  return PlanNotifier(
+    planRepo: ref.watch(planRepositoryProvider),
+    userId: ref.watch(currentUserProvider)?.id,
+  );
 });
 
 /// 현재 주차 Provider (편의)

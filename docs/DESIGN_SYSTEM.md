@@ -180,6 +180,23 @@
 스타일: 바 높이 24px, 4px radius, 바 사이 간격 4px
 ```
 
+### 3.10 Skeleton Loading
+```
+용도: 콘텐츠 로딩 시 플레이스홀더 (CircularProgressIndicator 대신 사용)
+구성:
+  - SkeletonBox: 직사각형 플레이스홀더 (카드, 텍스트 라인 등)
+  - SkeletonCircle: 원형 플레이스홀더 (아바타, 아이콘 등)
+스타일:
+  - Light: #E5E5EA → #F2F2F7 shimmer
+  - Dark: #2C2C2E → #3A3A3C shimmer
+  - 애니메이션: 1.5초 주기 좌→우 shimmer, easeInOut
+  - radius: 부모 컴포넌트와 동일 (카드=16px, 배지=8px 등)
+적용 기준:
+  - 콘텐츠 로딩 (화면, 카드, 리스트) → 스켈레톤 사용
+  - 액션 로딩 (버튼 클릭, 폼 제출) → CircularProgressIndicator 유지
+  - 장시간 작업 (AI 훈련표 생성) → 오버레이 + 상태 메시지 유지
+```
+
 ---
 
 ## 4. Spacing & Layout

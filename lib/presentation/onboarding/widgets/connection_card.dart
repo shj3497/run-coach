@@ -11,6 +11,7 @@ class ConnectionCard extends StatelessWidget {
   final String subtitle;
   final bool isRequired;
   final bool isConnected;
+  final bool isLoading;
   final VoidCallback onConnect;
 
   const ConnectionCard({
@@ -21,6 +22,7 @@ class ConnectionCard extends StatelessWidget {
     required this.subtitle,
     this.isRequired = false,
     required this.isConnected,
+    this.isLoading = false,
     required this.onConnect,
   });
 
@@ -43,7 +45,7 @@ class ConnectionCard extends StatelessWidget {
             width: 48,
             height: 48,
             decoration: BoxDecoration(
-              color: iconColor.withOpacity(0.1),
+              color: iconColor.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Icon(icon, color: iconColor, size: 28),
@@ -69,7 +71,7 @@ class ConnectionCard extends StatelessWidget {
                           vertical: 2,
                         ),
                         decoration: BoxDecoration(
-                          color: AppColors.error.withOpacity(0.1),
+                          color: AppColors.error.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: Text(
@@ -101,7 +103,7 @@ class ConnectionCard extends StatelessWidget {
                 vertical: 6,
               ),
               decoration: BoxDecoration(
-                color: AppColors.success.withOpacity(0.1),
+                color: AppColors.success.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(AppSpacing.badgeRadius),
               ),
               child: Row(
@@ -118,6 +120,12 @@ class ConnectionCard extends StatelessWidget {
                   ),
                 ],
               ),
+            )
+          else if (isLoading)
+            const SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(strokeWidth: 2),
             )
           else
             ElevatedButton(

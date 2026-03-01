@@ -22,6 +22,14 @@ class _RunningExperienceScreenState
   String? _selectedExperience;
   int? _selectedDays;
 
+  @override
+  void initState() {
+    super.initState();
+    final state = ref.read(onboardingProvider);
+    _selectedExperience = state.runningExperience;
+    _selectedDays = state.weeklyAvailableDays;
+  }
+
   bool get _isValid =>
       _selectedExperience != null && _selectedDays != null;
 

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/theme/app_colors.dart';
@@ -20,6 +21,23 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
   final _weightController = TextEditingController();
   String? _gender;
   int? _birthYear;
+
+  @override
+  void initState() {
+    super.initState();
+    final state = ref.read(onboardingProvider);
+    if (state.nickname.isNotEmpty) {
+      _nicknameController.text = state.nickname;
+    }
+    if (state.heightCm != null) {
+      _heightController.text = state.heightCm!.toStringAsFixed(0);
+    }
+    if (state.weightKg != null) {
+      _weightController.text = state.weightKg!.toStringAsFixed(0);
+    }
+    _gender = state.gender;
+    _birthYear = state.birthYear;
+  }
 
   @override
   void dispose() {
@@ -344,6 +362,7 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
                 ),
                 selected: year == _birthYear,
                 onTap: () {
+                  HapticFeedback.selectionClick();
                   setState(() => _birthYear = year);
                   Navigator.pop(ctx);
                 },

@@ -6,8 +6,12 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/theme/app_typography.dart';
 import '../common/widgets/progress_bar.dart';
+import '../common/widgets/skeleton.dart';
 import '../common/widgets/training_session_card.dart';
 import '../common/widgets/training_type_badge.dart';
+import '../../data/models/training_plan.dart';
+import '../home/providers/home_provider.dart';
+import '../providers/data_providers.dart';
 import 'providers/plan_provider.dart';
 
 /// C-2 플랜 화면 (훈련표)
@@ -22,7 +26,7 @@ class PlanScreen extends ConsumerWidget {
       return Scaffold(
         backgroundColor: AppColors.background(context),
         appBar: AppBar(title: const Text('훈련표')),
-        body: const Center(child: CircularProgressIndicator()),
+        body: const PlanScreenSkeleton(),
       );
     }
 
@@ -55,7 +59,7 @@ class PlanScreen extends ConsumerWidget {
               Icon(
                 Icons.calendar_month_rounded,
                 size: 80,
-                color: AppColors.primary(context).withOpacity(0.3),
+                color: AppColors.primary(context).withValues(alpha: 0.3),
               ),
               const SizedBox(height: AppSpacing.xl),
               Text(
@@ -120,7 +124,7 @@ class PlanScreen extends ConsumerWidget {
         backgroundColor: AppColors.background(context),
         actions: [
           IconButton(
-            icon: Icon(
+            icon: const Icon(
               Icons.info_outline_rounded,
               color: AppColors.textSecondary,
             ),
@@ -135,41 +139,62 @@ class PlanScreen extends ConsumerWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // 플랜 이름 + 상태
+              // 플랜 이름 + 상태 (드롭다운 트리거)
               Padding(
                 padding: const EdgeInsets.symmetric(
                   horizontal: AppSpacing.screenPadding,
                 ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        plan.name,
-                        style: AppTypography.bodyLarge.copyWith(
-                          color: AppColors.textPrimary(context),
-                          fontWeight: FontWeight.w600,
+                child: InkWell(
+                  onTap: () => _showPlanSelector(context, ref),
+                  borderRadius:
+                      BorderRadius.circular(AppSpacing.cardRadius),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Row(
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  plan.planName,
+                                  style: AppTypography.bodyLarge.copyWith(
+                                    color: AppColors.textPrimary(context),
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              const Icon(
+                                Icons.keyboard_arrow_down,
+                                size: 20,
+                                color: AppColors.textSecondary,
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppColors.success.withOpacity(0.15),
-                        borderRadius:
-                            BorderRadius.circular(AppSpacing.badgeRadius),
-                      ),
-                      child: Text(
-                        '활성',
-                        style: AppTypography.bodySmall.copyWith(
-                          color: AppColors.success,
-                          fontWeight: FontWeight.w600,
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppColors.success.withValues(alpha: 0.15),
+                            borderRadius:
+                                BorderRadius.circular(AppSpacing.badgeRadius),
+                          ),
+                          child: Text(
+                            '활성',
+                            style: AppTypography.bodySmall.copyWith(
+                              color: AppColors.success,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
                         ),
-                      ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               ),
               const SizedBox(height: AppSpacing.lg),
@@ -445,10 +470,48 @@ class PlanScreen extends ConsumerWidget {
       case SessionStatus.rest:
         return Icon(
           Icons.remove,
-          color: AppColors.textSecondary.withOpacity(0.5),
+          color: AppColors.textSecondary.withValues(alpha: 0.5),
           size: 22,
         );
     }
+  }
+
+  /// 플랜 선택 Bottom Sheet
+  void _showPlanSelector(BuildContext context, WidgetRef ref) {
+    final plansAsync = ref.read(userPlansProvider);
+    final activePlanId = ref.read(planProvider).activePlan?.id;
+
+    plansAsync.when(
+      data: (plans) {
+        if (plans.isEmpty) return;
+        showModalBottomSheet(
+          context: context,
+          backgroundColor: AppColors.surface(context),
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.vertical(
+              top: Radius.circular(16),
+            ),
+          ),
+          builder: (sheetContext) => _PlanSelectorSheet(
+            plans: plans,
+            activePlanId: activePlanId,
+            onSelect: (planId) async {
+              Navigator.of(sheetContext).pop();
+              if (planId != activePlanId) {
+                await ref
+                    .read(planProvider.notifier)
+                    .switchActivePlan(planId);
+                ref.invalidate(userPlansProvider);
+                ref.invalidate(activePlanProvider);
+                ref.invalidate(homeStateProvider);
+              }
+            },
+          ),
+        );
+      },
+      loading: () {},
+      error: (_, __) {},
+    );
   }
 
   String _formatDate(DateTime date) {
@@ -458,5 +521,178 @@ class PlanScreen extends ConsumerWidget {
   String _weekdayShort(int weekday) {
     const days = ['월', '화', '수', '목', '금', '토', '일'];
     return days[weekday - 1];
+  }
+}
+
+/// 플랜 선택 Bottom Sheet 위젯
+class _PlanSelectorSheet extends StatelessWidget {
+  final List<TrainingPlan> plans;
+  final String? activePlanId;
+  final ValueChanged<String> onSelect;
+
+  const _PlanSelectorSheet({
+    required this.plans,
+    required this.activePlanId,
+    required this.onSelect,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 핸들 바
+          const SizedBox(height: 8),
+          Container(
+            width: 36,
+            height: 4,
+            decoration: BoxDecoration(
+              color: AppColors.textSecondary.withValues(alpha: 0.3),
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          // 헤더
+          Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.screenPadding,
+            ),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                '플랜 선택',
+                style: AppTypography.h3.copyWith(
+                  color: AppColors.textPrimary(context),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          // 플랜 목록
+          ...plans.map((plan) {
+            final isActive = plan.id == activePlanId;
+            return _buildPlanItem(context, plan, isActive);
+          }),
+          const SizedBox(height: AppSpacing.md),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPlanItem(
+    BuildContext context,
+    TrainingPlan plan,
+    bool isActive,
+  ) {
+    final statusInfo = _getStatusInfo(plan.status);
+
+    return InkWell(
+      onTap: () => onSelect(plan.id),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.screenPadding,
+          vertical: AppSpacing.sm + 2,
+        ),
+        child: Row(
+          children: [
+            // 플랜 정보
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          plan.planName,
+                          style: AppTypography.body.copyWith(
+                            color: AppColors.textPrimary(context),
+                            fontWeight:
+                                isActive ? FontWeight.w700 : FontWeight.w400,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      // 상태 배지
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: statusInfo.color.withValues(alpha: 0.15),
+                          borderRadius:
+                              BorderRadius.circular(AppSpacing.badgeRadius),
+                        ),
+                        child: Text(
+                          statusInfo.label,
+                          style: AppTypography.caption.copyWith(
+                            color: statusInfo.color,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    _buildPlanSubtitle(plan),
+                    style: AppTypography.bodySmall.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            // 활성 플랜 체크 아이콘
+            if (isActive)
+              const Icon(
+                Icons.check_circle,
+                color: AppColors.success,
+                size: 22,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _buildPlanSubtitle(TrainingPlan plan) {
+    final parts = <String>[];
+    parts.add('${plan.goalDistanceKm.toStringAsFixed(0)}km');
+    if (plan.goalRaceDate != null) {
+      final d = plan.goalRaceDate!;
+      parts.add(
+        '${d.year}/${d.month.toString().padLeft(2, '0')}/${d.day.toString().padLeft(2, '0')}',
+      );
+    }
+    if (plan.goalTimeSeconds != null) {
+      final total = plan.goalTimeSeconds!;
+      final h = total ~/ 3600;
+      final m = (total % 3600) ~/ 60;
+      final s = total % 60;
+      if (h > 0) {
+        parts.add(
+          '$h:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}',
+        );
+      } else {
+        parts.add('${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}');
+      }
+    }
+    parts.add('${plan.totalWeeks}주');
+    return parts.join(' · ');
+  }
+
+  ({Color color, String label}) _getStatusInfo(String status) {
+    switch (status) {
+      case 'active':
+        return (color: AppColors.success, label: '활성');
+      case 'completed':
+        return (color: AppColors.textSecondary, label: '완료');
+      default: // upcoming
+        return (color: AppColors.primaryLight, label: '대기');
+    }
   }
 }

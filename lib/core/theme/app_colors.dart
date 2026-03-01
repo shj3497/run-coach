@@ -11,8 +11,8 @@ class AppColors {
   static const Color primaryDarkPressed = Color(0xFF4240A8);
   static const Color primaryLightPressed = Color(0xFF5856D6);
 
-  static Color primaryLightBg = const Color(0xFF5856D6).withOpacity(0.12);
-  static Color primaryDarkBg = const Color(0xFF7B79FF).withOpacity(0.15);
+  static Color primaryLightBg = const Color(0xFF5856D6).withValues(alpha: 0.12);
+  static Color primaryDarkBg = const Color(0xFF7B79FF).withValues(alpha: 0.15);
 
   // ─── Background ───
   static const Color backgroundLight = Color(0xFFF2F2F7);

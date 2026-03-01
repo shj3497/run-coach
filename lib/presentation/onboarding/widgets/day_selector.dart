@@ -19,37 +19,40 @@ class DaySelector extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
       children: List.generate(maxDays, (index) {
         final day = index + 1;
         final isSelected = day == selectedDays;
 
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
-          child: GestureDetector(
-            onTap: () => onChanged(day),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: isSelected
-                    ? AppColors.primary(context)
-                    : AppColors.surface(context),
-                borderRadius: BorderRadius.circular(AppSpacing.badgeRadius),
-                border: Border.all(
+        return Expanded(
+          child: Padding(
+            padding: EdgeInsets.only(
+              left: index == 0 ? 0 : AppSpacing.xs / 2,
+              right: index == maxDays - 1 ? 0 : AppSpacing.xs / 2,
+            ),
+            child: GestureDetector(
+              onTap: () => onChanged(day),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                height: 44,
+                decoration: BoxDecoration(
                   color: isSelected
                       ? AppColors.primary(context)
-                      : AppColors.divider(context),
+                      : AppColors.surface(context),
+                  borderRadius: BorderRadius.circular(AppSpacing.badgeRadius),
+                  border: Border.all(
+                    color: isSelected
+                        ? AppColors.primary(context)
+                        : AppColors.divider(context),
+                  ),
                 ),
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                '$day',
-                style: AppTypography.h3.copyWith(
-                  color: isSelected
-                      ? Colors.white
-                      : AppColors.textPrimary(context),
+                alignment: Alignment.center,
+                child: Text(
+                  '$day',
+                  style: AppTypography.h3.copyWith(
+                    color: isSelected
+                        ? Colors.white
+                        : AppColors.textPrimary(context),
+                  ),
                 ),
               ),
             ),

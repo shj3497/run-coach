@@ -19,6 +19,7 @@ import 'plan/plan_detail_screen.dart';
 import 'plan/plan_screen.dart';
 import 'plan/session_detail_screen.dart';
 import 'records/records_screen.dart';
+import 'records/workout_detail_screen.dart';
 
 final GlobalKey<NavigatorState> _rootNavigatorKey = GlobalKey<NavigatorState>();
 
@@ -49,6 +50,21 @@ final routerProvider = Provider<GoRouter>((ref) {
     initialLocation: '/splash',
     refreshListenable: refreshListenable,
     redirect: (context, state) async {
+      // Strava OAuth 콜백 딥링크는 app_links 리스너가 처리하므로
+      // go_router에서는 기존 화면으로 리다이렉트 (루트 경로 체크보다 먼저)
+      final uri = state.uri.toString();
+      if (uri.contains('strava-callback')) {
+        final prefs = await SharedPreferences.getInstance();
+        final onboardingDone =
+            prefs.getBool('onboarding_completed') ?? false;
+        return onboardingDone ? '/home' : '/onboarding/data-connection';
+      }
+
+      // 루트 경로 → splash로 리다이렉트 (auth 상태에 따라 재분기)
+      if (state.matchedLocation == '/') {
+        return '/splash';
+      }
+
       final session = SupabaseService.client.auth.currentSession;
       final isLoggedIn = session != null;
 
@@ -148,6 +164,15 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) {
           final planId = state.pathParameters['planId']!;
           return PlanDetailScreen(planId: planId);
+        },
+      ),
+      // D-2 운동 기록 상세
+      GoRoute(
+        path: '/records/:workoutId',
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (context, state) {
+          final workoutId = state.pathParameters['workoutId']!;
+          return WorkoutDetailScreen(workoutId: workoutId);
         },
       ),
 

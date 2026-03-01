@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/theme/app_typography.dart';
+import '../providers/strava_auth_provider.dart';
 import 'providers/onboarding_provider.dart';
 import 'widgets/connection_card.dart';
 
@@ -14,6 +15,21 @@ class DataConnectionScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(onboardingProvider);
+    final stravaAuth = ref.watch(stravaAuthProvider);
+
+    // Strava 연결 성공 시 온보딩 상태 업데이트
+    ref.listen<StravaAuthState>(stravaAuthProvider, (prev, next) {
+      if (prev?.status != StravaAuthStatus.connected &&
+          next.status == StravaAuthStatus.connected) {
+        ref.read(onboardingProvider.notifier).setStravaConnected(true);
+      }
+      if (next.status == StravaAuthStatus.error &&
+          next.errorMessage != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(next.errorMessage!)),
+        );
+      }
+    });
 
     return Scaffold(
       backgroundColor: AppColors.background(context),
@@ -45,7 +61,7 @@ class DataConnectionScreen extends ConsumerWidget {
               ),
               const SizedBox(height: AppSpacing.sm),
               Text(
-                '데이터 연동은 추후 업데이트될 예정입니다',
+                'Strava를 연동하면 운동 기록을 자동으로 가져옵니다',
                 style: AppTypography.bodySmall.copyWith(
                   color: AppColors.textSecondary,
                 ),
@@ -76,13 +92,12 @@ class DataConnectionScreen extends ConsumerWidget {
                 iconColor: const Color(0xFFFC4C02),
                 title: 'Strava',
                 subtitle: '선택 (더 풍부한 데이터 활용 가능)',
-                isConnected: state.stravaConnected,
+                isConnected: stravaAuth.isConnected,
+                isLoading: stravaAuth.isConnecting,
                 onConnect: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Strava 연동은 추후 업데이트 예정입니다'),
-                    ),
-                  );
+                  ref
+                      .read(stravaAuthProvider.notifier)
+                      .startOAuthFlow();
                 },
               ),
             ],

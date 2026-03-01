@@ -14,7 +14,13 @@ class LLMPrompts {
 당신은 전문 런닝 코치입니다. Jack Daniels의 VDOT 시스템에 기반하여 개인화된 훈련표를 작성합니다.
 
 핵심 원칙:
-1. 제공된 페이스 존(E/M/T/I/R)을 반드시 준수합니다.
+1. 각 세션의 target_pace와 workout_detail.pace_range는 반드시 제공된 pace_zones 데이터에서 해당 session_type에 맞는 페이스를 그대로 사용해야 합니다.
+   - easy, recovery, long_run → pace_zones.E의 min_pace~max_pace 범위
+   - marathon_pace → pace_zones.M의 pace
+   - threshold → pace_zones.T의 pace
+   - interval → pace_zones.I의 pace (E 페이스보다 반드시 빨라야 합니다)
+   - repetition → pace_zones.R의 pace (I 페이스보다 반드시 빨라야 합니다)
+   절대로 임의의 페이스를 생성하지 마세요. pace_zones에 제공된 값을 그대로 사용하세요.
 2. 주기화(Periodization) 원칙을 따릅니다: base -> build -> peak -> taper
 3. 주간 훈련량(거리)은 점진적으로 증가하되, 3주 증가 후 1주 회복(10~15% 감소)을 반복합니다.
 4. 훈련 강도 배분: 이지런이 전체의 70~80%, 나머지 20~30%가 M/T/I/R
@@ -24,59 +30,91 @@ class LLMPrompts {
 응답은 반드시 지정된 JSON 형식으로 작성하세요.
 ''';
 
-  /// 훈련표 생성 사용자 프롬프트 템플릿
+  /// 훈련표 청크 단위 생성 프롬프트
   ///
-  /// [context]에 구조화된 데이터를 JSON 문자열로 전달합니다.
-  static String trainingPlanUserPrompt(String contextJson) {
-    return '''
-아래 데이터를 기반으로 훈련표를 생성해주세요.
+  /// 전체 훈련표를 한 번에 생성하면 LLM이 일부 주차만 생성하는 문제가 있어
+  /// 8주 단위로 나누어 생성합니다.
+  ///
+  /// [contextJson] 구조화된 훈련 context JSON 문자열
+  /// [startWeek] 이번 청크의 시작 주차 (1부터)
+  /// [endWeek] 이번 청크의 끝 주차
+  /// [totalWeeks] 전체 훈련 주수
+  /// [includeOverview] true면 plan_name, plan_overview도 포함 (첫 번째 청크)
+  static String trainingPlanChunkPrompt({
+    required String contextJson,
+    required int startWeek,
+    required int endWeek,
+    required int totalWeeks,
+    required bool includeOverview,
+  }) {
+    final buffer = StringBuffer();
 
-$contextJson
+    buffer.writeln(
+        '아래 데이터를 기반으로 훈련표의 $startWeek~$endWeek주차를 생성해주세요.');
+    buffer.writeln('(전체 $totalWeeks주 중 $startWeek-$endWeek주차)');
+    buffer.writeln('');
+    buffer.writeln(contextJson);
+    buffer.writeln('');
+    buffer.writeln('다음 JSON 형식으로 응답해주세요:');
+    buffer.writeln('{');
 
-다음 JSON 형식으로 응답해주세요:
-{
-  "plan_name": "플랜 이름 (한국어, 예: '2025 JTBC 하프 1:55 도전')",
-  "plan_overview": "전체 훈련 계획에 대한 코칭 설명 (한국어, 2~3문단)",
-  "weeks": [
-    {
-      "week_number": 1,
-      "phase": "base | build | peak | taper",
-      "weekly_summary": "이번 주 목표와 주의사항 (한국어)",
-      "target_distance_km": 30,
-      "sessions": [
-        {
-          "day_of_week": 1,
-          "session_type": "easy | marathon_pace | threshold | interval | repetition | long_run | recovery | cross_training | rest",
-          "title": "훈련 제목 (한국어, 예: '이지런 8km')",
-          "description": "훈련 목적과 방법 코치 설명 (한국어)",
-          "target_distance_km": 8.0,
-          "target_duration_minutes": 50,
-          "target_pace": "5:54-6:29/km",
-          "workout_detail": {
-            "type": "steady | intervals | tempo | progression",
-            "pace_range": {"min": "5:54/km", "max": "6:29/km"},
-            "warmup": {"distance_km": 2.0, "pace": "6:00/km"},
-            "intervals": [{"reps": 6, "distance_m": 800, "pace": "4:32/km", "rest_seconds": 120}],
-            "cooldown": {"distance_km": 2.0, "pace": "6:00/km"}
-          }
-        }
-      ]
+    if (includeOverview) {
+      buffer.writeln(
+          '  "plan_name": "플랜 이름 (한국어, 예: \'2025 JTBC 하프 1:55 도전\')",');
+      buffer.writeln(
+          '  "plan_overview": "전체 훈련 계획에 대한 코칭 설명 (한국어, 2~3문단)",');
     }
-  ]
-}
 
-주의사항:
-- day_of_week: 1=월요일 ~ 7=일요일
-- session_type은 위 목록의 값만 사용
-- workout_detail의 type은 세션 유형에 맞게 선택:
-  - easy/recovery: "steady"
-  - marathon_pace/threshold: "tempo"
-  - interval/repetition: "intervals"
-  - long_run: "steady" 또는 "progression"
-- rest일에는 distance, duration, pace를 null로 설정
-- 모든 설명은 한국어로 작성
-- 주당 훈련일수에 맞게 session 수 조절 (나머지는 rest)
-''';
+    buffer.writeln('  "weeks": [');
+    buffer.writeln('    {');
+    buffer.writeln('      "week_number": $startWeek,');
+    buffer.writeln('      "phase": "base | build | peak | taper",');
+    buffer.writeln('      "weekly_summary": "이번 주 목표 (한국어, 1문장)",');
+    buffer.writeln('      "target_distance_km": 30,');
+    buffer.writeln('      "sessions": [');
+    buffer.writeln('        {');
+    buffer.writeln('          "day_of_week": 1,');
+    buffer.writeln(
+        '          "session_type": "easy | marathon_pace | threshold | interval | repetition | long_run | recovery | cross_training",');
+    buffer.writeln('          "title": "훈련 제목 (한국어)",');
+    buffer.writeln('          "description": "1문장 설명",');
+    buffer.writeln('          "target_distance_km": 8.0,');
+    buffer.writeln('          "target_duration_minutes": 50,');
+    buffer.writeln(
+        '          "target_pace": "pace_zones에서 해당 존 페이스 사용 (예: easy→E존, interval→I존)",');
+    buffer.writeln('          "workout_detail": {');
+    buffer.writeln(
+        '            "type": "steady | intervals | tempo | progression",');
+    buffer.writeln(
+        '            "pace_range": {"min": "해당 존 페이스", "max": "해당 존 페이스"}');
+    buffer.writeln('          }');
+    buffer.writeln('        }');
+    buffer.writeln('      ]');
+    buffer.writeln('    }');
+    buffer.writeln('  ]');
+    buffer.writeln('}');
+    buffer.writeln('');
+    buffer.writeln('주의사항:');
+    buffer.writeln(
+        '- $startWeek주차부터 $endWeek주차까지 빠짐없이 모두 생성하세요');
+    buffer.writeln('- day_of_week: 1=월요일 ~ 7=일요일');
+    buffer.writeln('- 훈련 세션만 포함 (휴식일 제외)');
+    buffer.writeln('- 각 주에는 정확히 주당 훈련일수만큼의 세션만 포함');
+    buffer.writeln(
+        '- workout_detail.type: easy/recovery→"steady", marathon_pace/threshold→"tempo", interval/repetition→"intervals", long_run→"steady" 또는 "progression"');
+    buffer.writeln('- description은 1문장으로 간결하게');
+    buffer.writeln('- 모든 설명은 한국어로');
+    buffer.writeln(
+        '- [필수] target_pace는 반드시 위 pace_zones 데이터에서 가져오세요:');
+    buffer.writeln('  · easy/recovery/long_run → E존 min_pace~max_pace');
+    buffer.writeln('  · marathon_pace → M존 pace');
+    buffer.writeln('  · threshold → T존 pace');
+    buffer.writeln('  · interval → I존 pace (E존보다 빠름)');
+    buffer.writeln('  · repetition → R존 pace (I존보다 빠름)');
+    buffer.writeln(
+        '- 페이스 순서: R < I < T < M < E (숫자가 작을수록 빠름). 임의로 페이스를 생성하지 마세요');
+
+    return buffer.toString();
   }
 
   // ---------------------------------------------------------------------------
@@ -205,10 +243,10 @@ $contextJson
       final seconds = goalTimeSeconds % 60;
       if (hours > 0) {
         buffer.writeln(
-            '목표 시간: ${hours}시간 ${minutes}분${seconds > 0 ? " ${seconds}초" : ""}');
+            '목표 시간: $hours시간 $minutes분${seconds > 0 ? " $seconds초" : ""}');
       } else {
         buffer.writeln(
-            '목표 시간: ${minutes}분${seconds > 0 ? " ${seconds}초" : ""}');
+            '목표 시간: $minutes분${seconds > 0 ? " $seconds초" : ""}');
       }
     } else {
       buffer.writeln('목표: 완주');
@@ -216,14 +254,14 @@ $contextJson
 
     buffer.writeln('');
     buffer.writeln('=== 훈련 조건 ===');
-    buffer.writeln('주간 훈련 가능 일수: ${trainingDaysPerWeek}일');
-    buffer.writeln('총 훈련 기간: ${totalWeeks}주');
+    buffer.writeln('주간 훈련 가능 일수: $trainingDaysPerWeek일');
+    buffer.writeln('총 훈련 기간: $totalWeeks주');
 
     buffer.writeln('');
     buffer.writeln('=== 요청 ===');
     buffer.writeln(
-        '위 정보를 기반으로 ${totalWeeks}주간의 개인화 훈련표를 JSON 형식으로 생성해주세요.');
-    buffer.writeln('각 주에는 정확히 ${trainingDaysPerWeek}개의 훈련 세션을 배치하세요.');
+        '위 정보를 기반으로 $totalWeeks주간의 개인화 훈련표를 JSON 형식으로 생성해주세요.');
+    buffer.writeln('각 주에는 정확히 $trainingDaysPerWeek개의 훈련 세션을 배치하세요.');
     buffer.writeln('훈련이 없는 요일은 rest 세션으로 채워서 총 7일을 채워주세요.');
 
     return buffer.toString();
@@ -242,11 +280,11 @@ $contextJson
   }) {
     final buffer = StringBuffer();
 
-    buffer.writeln('=== ${weekNumber}주차 훈련 결과 ===');
+    buffer.writeln('=== $weekNumber주차 훈련 결과 ===');
     buffer.writeln('훈련 단계: $phase');
-    buffer.writeln('계획 세션: ${totalSessions}개');
-    buffer.writeln('완료: ${completedSessions}개');
-    buffer.writeln('스킵: ${skippedSessions}개');
+    buffer.writeln('계획 세션: $totalSessions개');
+    buffer.writeln('완료: $completedSessions개');
+    buffer.writeln('스킵: $skippedSessions개');
 
     final rate = totalSessions > 0
         ? (completedSessions / totalSessions * 100).toStringAsFixed(0)

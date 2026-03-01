@@ -6,6 +6,7 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/theme/app_typography.dart';
 import '../../core/utils/time_formatter.dart';
+import '../../data/models/training_plan.dart';
 import 'providers/plan_provider.dart';
 
 /// D-6 플랜 상세/관리 화면
@@ -46,7 +47,7 @@ class PlanDetailScreen extends ConsumerWidget {
         ),
         actions: [
           PopupMenuButton<String>(
-            icon: Icon(
+            icon: const Icon(
               Icons.more_vert_rounded,
               color: AppColors.textSecondary,
             ),
@@ -176,7 +177,7 @@ class PlanDetailScreen extends ConsumerWidget {
             children: [
               Expanded(
                 child: Text(
-                  plan.name,
+                  plan.planName,
                   style: AppTypography.h2.copyWith(
                     color: AppColors.textPrimary(context),
                   ),
@@ -200,13 +201,13 @@ class PlanDetailScreen extends ConsumerWidget {
             label: '총 주차',
             value: '${plan.totalWeeks}주',
           ),
-          if (plan.vdotAtCreation != null) ...[
+          if (plan.vdotScore != null) ...[
             const SizedBox(height: AppSpacing.sm),
             _buildInfoRow(
               context,
               icon: Icons.analytics_outlined,
               label: '생성 시 VDOT',
-              value: plan.vdotAtCreation!.toStringAsFixed(1),
+              value: plan.vdotScore!.toStringAsFixed(1),
             ),
           ],
         ],
@@ -233,13 +234,12 @@ class PlanDetailScreen extends ConsumerWidget {
             ),
           ),
           const SizedBox(height: AppSpacing.md),
-          if (plan.goalDistanceKm != null)
-            _buildInfoRow(
-              context,
-              icon: Icons.straighten_rounded,
-              label: '목표 거리',
-              value: _formatDistance(plan.goalDistanceKm!),
-            ),
+          _buildInfoRow(
+            context,
+            icon: Icons.straighten_rounded,
+            label: '목표 거리',
+            value: _formatDistance(plan.goalDistanceKm),
+          ),
           if (plan.goalTimeSeconds != null) ...[
             const SizedBox(height: AppSpacing.sm),
             _buildInfoRow(
@@ -276,13 +276,15 @@ class PlanDetailScreen extends ConsumerWidget {
           ),
           const SizedBox(height: AppSpacing.md),
           ...paceZones.entries.map((entry) {
-            final zone = TrainingZones.fromType(entry.key);
+            final zoneType = trainingZoneTypeFromDbString(entry.key);
+            final zone = TrainingZones.fromType(zoneType);
+            final paceValue = entry.value?.toString() ?? '';
             return Padding(
               padding: const EdgeInsets.only(bottom: AppSpacing.sm),
               child: _buildPaceZoneRow(
                 context,
                 zone: zone,
-                pace: '${entry.value}/km',
+                pace: paceValue,
               ),
             );
           }),
@@ -422,22 +424,22 @@ class PlanDetailScreen extends ConsumerWidget {
 
     switch (status) {
       case 'active':
-        bgColor = AppColors.success.withOpacity(0.15);
+        bgColor = AppColors.success.withValues(alpha: 0.15);
         textColor = AppColors.success;
         label = '활성';
         break;
       case 'completed':
-        bgColor = AppColors.primary(context).withOpacity(0.15);
+        bgColor = AppColors.primary(context).withValues(alpha: 0.15);
         textColor = AppColors.primary(context);
         label = '완료';
         break;
       case 'cancelled':
-        bgColor = AppColors.textSecondary.withOpacity(0.15);
+        bgColor = AppColors.textSecondary.withValues(alpha: 0.15);
         textColor = AppColors.textSecondary;
         label = '취소';
         break;
       default:
-        bgColor = AppColors.textSecondary.withOpacity(0.15);
+        bgColor = AppColors.textSecondary.withValues(alpha: 0.15);
         textColor = AppColors.textSecondary;
         label = status;
     }

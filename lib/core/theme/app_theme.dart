@@ -33,7 +33,7 @@ class AppTheme {
           ),
           systemOverlayStyle: SystemUiOverlayStyle.dark,
         ),
-        cardTheme: CardTheme(
+        cardTheme: CardThemeData(
           color: AppColors.surfaceLight,
           elevation: 0,
           shape: RoundedRectangleBorder(
@@ -94,7 +94,7 @@ class AppTheme {
           ),
           systemOverlayStyle: SystemUiOverlayStyle.light,
         ),
-        cardTheme: CardTheme(
+        cardTheme: CardThemeData(
           color: AppColors.surfaceDark,
           elevation: 0,
           shape: RoundedRectangleBorder(
