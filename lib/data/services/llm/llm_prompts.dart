@@ -130,8 +130,20 @@ class LLMPrompts {
 2. 데이터 기반으로 구체적인 피드백을 제공합니다.
 3. 달성하지 못한 부분은 비난하지 않고 개선 방안을 제시합니다.
 4. 다음 주 훈련의 핵심 포인트를 명확히 전달합니다.
+5. 훈련 존 용어는 반드시 한글 풀네임을 사용합니다:
+   - 이지런 (Easy Run), 마라톤페이스 (Marathon Pace), 템포런 (Threshold Run)
+   - 인터벌 (Interval), 반복달리기 (Repetition), 장거리런 (Long Run)
+   - E런, T런, M페이스 등 약어는 절대 사용하지 마세요.
 
-응답은 한국어로 작성하세요. 300자 이내로 간결하게 작성하세요.
+응답은 반드시 아래 JSON 형식으로 작성하세요:
+{
+  "summary": "이번 주 전체 요약 (1~2문장)",
+  "highlights": ["잘한 점 1", "잘한 점 2"],
+  "improvements": ["개선점 1"],
+  "next_week_advice": "다음 주 핵심 조언 (1~2문장)"
+}
+
+한국어로 작성하세요.
 ''';
 
   /// 주간 리뷰 사용자 프롬프트 템플릿
@@ -155,6 +167,8 @@ $contextJson
 1. 간결하게 1~2문장으로 피드백합니다.
 2. 목표 대비 실제 성과를 비교합니다.
 3. 격려하는 톤을 유지합니다.
+4. 날씨 정보가 제공된 경우, 날씨를 고려한 피드백을 제공합니다.
+5. 훈련 존 용어는 한글 풀네임을 사용합니다 (이지런, 템포런, 마라톤페이스 등).
 
 응답은 한국어로 작성하세요. 100자 이내로 작성하세요.
 ''';
@@ -167,15 +181,16 @@ $contextJson
   static const String weatherAdjustmentSystemPrompt = '''
 당신은 전문 런닝 코치입니다. 현재 날씨를 고려하여 오늘 훈련의 페이스 보정을 제안합니다.
 
-기온별 페이스 보정 가이드라인:
-- 10~15도C: 최적 (보정 불필요)
-- 16~20도C: 0~5초/km 느리게
-- 21~25도C: 5~15초/km 느리게
-- 26~30도C: 15~30초/km 느리게
-- 31도C 이상: 30~45초/km 느리게, 실내 러닝 권장
-- 0도C 이하: 5~10초/km 느리게, 보온 주의
-- 습도 80% 이상: 추가 5~10초/km 느리게
+페이스 보정은 이미 계산되어 있습니다. 계산된 보정 비율과 보정된 페이스를 참고하여
+러너에게 따뜻하고 격려하는 톤으로 안내 메시지를 작성하세요.
 
+추가 고려사항:
+- 비/눈이 올 경우 미끄럼 주의
+- 강풍(8m/s 이상)일 경우 바람 방향 고려
+- 30도C 이상이면 실내 러닝 권장 가능
+- 0도C 이하이면 보온 주의
+
+훈련 존 용어는 한글 풀네임을 사용합니다 (이지런, 템포런, 마라톤페이스 등).
 응답은 한국어로 작성하세요. 150자 이내로 간결하게 작성하세요.
 ''';
 
@@ -356,6 +371,9 @@ $contextJson
     required double temperatureC,
     required int humidity,
     String? weatherCondition,
+    double? windSpeedMs,
+    double? adjustmentPercent,
+    String? adjustedPaceRange,
   }) {
     final buffer = StringBuffer();
 
@@ -369,12 +387,25 @@ $contextJson
     buffer.writeln('=== 현재 날씨 ===');
     buffer.writeln('기온: ${temperatureC.toStringAsFixed(1)}°C');
     buffer.writeln('습도: $humidity%');
+    if (windSpeedMs != null) {
+      buffer.writeln('풍속: ${windSpeedMs.toStringAsFixed(1)}m/s');
+    }
     if (weatherCondition != null) {
       buffer.writeln('날씨 상태: $weatherCondition');
     }
 
+    if (adjustmentPercent != null && adjustmentPercent > 0) {
+      buffer.writeln('');
+      buffer.writeln('=== 계산된 보정 ===');
+      buffer.writeln(
+          '보정 비율: ${adjustmentPercent.toStringAsFixed(0)}% 느리게');
+      if (adjustedPaceRange != null) {
+        buffer.writeln('보정된 페이스: $adjustedPaceRange');
+      }
+    }
+
     buffer.writeln('');
-    buffer.writeln('위 날씨 조건을 고려하여 오늘의 페이스 보정을 제안해주세요.');
+    buffer.writeln('위 날씨 조건과 보정을 참고하여 러너에게 안내 메시지를 작성해주세요.');
 
     return buffer.toString();
   }

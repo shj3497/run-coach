@@ -9,6 +9,7 @@ import '../../core/utils/time_formatter.dart';
 import '../../data/models/workout_log.dart';
 import '../common/widgets/km_split_bar.dart';
 import '../common/widgets/stat_card.dart';
+import '../common/widgets/workout_stream_chart.dart';
 import '../providers/data_providers.dart';
 
 /// D-2 운동 기록 상세 화면
@@ -19,7 +20,7 @@ class WorkoutDetailScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final workoutAsync = ref.watch(workoutLogProvider(workoutId));
+    final workoutAsync = ref.watch(enrichedWorkoutLogProvider(workoutId));
 
     return Scaffold(
       backgroundColor: AppColors.background(context),
@@ -106,10 +107,10 @@ class WorkoutDetailScreen extends ConsumerWidget {
             const SizedBox(height: AppSpacing.xl),
           ],
 
-          // 심박수 그래프
+          // 활동 그래프 (심박수 / 고도 / 페이스)
           if (workout.heartRateData != null &&
               workout.heartRateData!.isNotEmpty) ...[
-            _buildHeartRateSection(context, workout),
+            _buildStreamChartSection(context, workout),
             const SizedBox(height: AppSpacing.xl),
           ],
 
@@ -293,7 +294,7 @@ class WorkoutDetailScreen extends ConsumerWidget {
             color: AppColors.surface(context),
             borderRadius: BorderRadius.circular(AppSpacing.cardRadius),
           ),
-          child: KmSplitChart(splits: splits),
+          child: KmSplitTable(splits: splits),
         ),
       ],
     );
@@ -311,11 +312,20 @@ class WorkoutDetailScreen extends ConsumerWidget {
         final paceText = PaceFormatter.toMMSS(paceSeconds);
         final color = _getZoneColorForPace(paceSeconds);
 
+        // 심박수
+        final avgHr = split['avg_heart_rate'] as int?;
+
+        // 고도 변화
+        final elevRaw = split['elevation_diff_m'];
+        final elevDiff = elevRaw is num ? elevRaw.toDouble() : null;
+
         result.add(KmSplitData(
           km: km,
           paceSeconds: paceSeconds,
           paceText: paceText,
           color: color,
+          avgHeartRate: avgHr,
+          elevationDiffM: elevDiff,
         ));
       }
     }
@@ -332,16 +342,13 @@ class WorkoutDetailScreen extends ConsumerWidget {
     return TrainingZones.easyColor;                               // >= 5:40
   }
 
-  /// 심박수 그래프 섹션
-  Widget _buildHeartRateSection(BuildContext context, WorkoutLog workout) {
-    final hrData = _parseHeartRateData(workout.heartRateData!);
-    if (hrData.isEmpty) return const SizedBox.shrink();
-
+  /// 활동 그래프 섹션 (심박수 / 고도 / 페이스 전환)
+  Widget _buildStreamChartSection(BuildContext context, WorkoutLog workout) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          '심박수 추이',
+          '활동 그래프',
           style: AppTypography.h2.copyWith(
             color: AppColors.textPrimary(context),
           ),
@@ -353,62 +360,10 @@ class WorkoutDetailScreen extends ConsumerWidget {
             color: AppColors.surface(context),
             borderRadius: BorderRadius.circular(AppSpacing.cardRadius),
           ),
-          child: Column(
-            children: [
-              // 심박수 범위 표시
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    '평균 ${workout.avgHeartRate ?? "-"}bpm',
-                    style: AppTypography.bodySmall.copyWith(
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                  Text(
-                    '최대 ${workout.maxHeartRate ?? "-"}bpm',
-                    style: AppTypography.bodySmall.copyWith(
-                      color: AppColors.error,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: AppSpacing.md),
-              // CustomPaint 심박수 라인 차트
-              SizedBox(
-                height: 150,
-                width: double.infinity,
-                child: CustomPaint(
-                  painter: HeartRateChartPainter(
-                    data: hrData,
-                    avgHeartRate: workout.avgHeartRate,
-                    lineColor: AppColors.error,
-                    avgLineColor: AppColors.textSecondary.withValues(alpha: 0.5),
-                    fillColor: AppColors.error.withValues(alpha: 0.1),
-                  ),
-                ),
-              ),
-            ],
-          ),
+          child: WorkoutStreamChart(streamData: workout.heartRateData!),
         ),
       ],
     );
-  }
-
-  /// heart_rate_data jsonb 파싱
-  List<int> _parseHeartRateData(List<dynamic> data) {
-    final result = <int>[];
-    for (final item in data) {
-      if (item is Map<String, dynamic>) {
-        final bpm = item['bpm'] as int?;
-        if (bpm != null && bpm > 0) {
-          result.add(bpm);
-        }
-      } else if (item is int) {
-        result.add(item);
-      }
-    }
-    return result;
   }
 
   /// 추가 정보 존재 여부
@@ -602,105 +557,3 @@ final _sessionFeedbackProvider =
   return feedback?.content;
 });
 
-/// 심박수 라인 차트 CustomPainter
-class HeartRateChartPainter extends CustomPainter {
-  final List<int> data;
-  final int? avgHeartRate;
-  final Color lineColor;
-  final Color avgLineColor;
-  final Color fillColor;
-
-  HeartRateChartPainter({
-    required this.data,
-    this.avgHeartRate,
-    required this.lineColor,
-    required this.avgLineColor,
-    required this.fillColor,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (data.isEmpty) return;
-
-    final minBpm = data.reduce((a, b) => a < b ? a : b).toDouble();
-    final maxBpm = data.reduce((a, b) => a > b ? a : b).toDouble();
-    final range = maxBpm - minBpm;
-    final effectiveRange = range > 0 ? range : 1.0;
-
-    // 패딩
-    const topPadding = 8.0;
-    const bottomPadding = 8.0;
-    final chartHeight = size.height - topPadding - bottomPadding;
-
-    // 데이터 포인트 간격
-    final stepX = size.width / (data.length - 1).clamp(1, data.length);
-
-    // 라인 패스 생성
-    final linePath = Path();
-    final fillPath = Path();
-
-    for (var i = 0; i < data.length; i++) {
-      final x = i * stepX;
-      final normalizedY = (data[i] - minBpm) / effectiveRange;
-      final y = topPadding + chartHeight * (1 - normalizedY);
-
-      if (i == 0) {
-        linePath.moveTo(x, y);
-        fillPath.moveTo(x, size.height);
-        fillPath.lineTo(x, y);
-      } else {
-        linePath.lineTo(x, y);
-        fillPath.lineTo(x, y);
-      }
-    }
-
-    // Fill path 닫기
-    fillPath.lineTo((data.length - 1) * stepX, size.height);
-    fillPath.close();
-
-    // Fill 그리기
-    final fillPaint = Paint()
-      ..color = fillColor
-      ..style = PaintingStyle.fill;
-    canvas.drawPath(fillPath, fillPaint);
-
-    // Line 그리기
-    final linePaint = Paint()
-      ..color = lineColor
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.0
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
-    canvas.drawPath(linePath, linePaint);
-
-    // 평균 심박수 점선
-    if (avgHeartRate != null && range > 0) {
-      final normalizedAvg = (avgHeartRate! - minBpm) / effectiveRange;
-      final avgY = topPadding + chartHeight * (1 - normalizedAvg);
-
-      final dashPaint = Paint()
-        ..color = avgLineColor
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.0;
-
-      // 점선 그리기
-      const dashWidth = 6.0;
-      const dashSpace = 4.0;
-      var startX = 0.0;
-      while (startX < size.width) {
-        canvas.drawLine(
-          Offset(startX, avgY),
-          Offset((startX + dashWidth).clamp(0, size.width), avgY),
-          dashPaint,
-        );
-        startX += dashWidth + dashSpace;
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant HeartRateChartPainter oldDelegate) {
-    return oldDelegate.data != data ||
-        oldDelegate.avgHeartRate != avgHeartRate;
-  }
-}

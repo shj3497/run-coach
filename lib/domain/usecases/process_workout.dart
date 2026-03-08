@@ -1,7 +1,10 @@
+import '../../core/utils/pace_adjustment.dart';
 import '../../data/models/training_session.dart';
 import '../../data/models/workout_log.dart';
 import '../../data/repositories/plan_repository.dart';
 import '../../data/repositories/workout_repository.dart';
+import '../../data/services/location_service.dart';
+import '../../data/services/weather_service.dart';
 import 'match_workout_to_session.dart';
 
 /// 워크아웃 데이터 처리 파이프라인
@@ -17,13 +20,19 @@ class ProcessWorkoutUseCase {
   final WorkoutRepository _workoutRepository;
   final PlanRepository _planRepository;
   final MatchWorkoutToSession _matchUseCase;
+  final WeatherService _weatherService;
+  final LocationService _locationService;
 
   const ProcessWorkoutUseCase({
     required WorkoutRepository workoutRepository,
     required PlanRepository planRepository,
+    required WeatherService weatherService,
+    required LocationService locationService,
     MatchWorkoutToSession matchUseCase = const MatchWorkoutToSession(),
   })  : _workoutRepository = workoutRepository,
         _planRepository = planRepository,
+        _weatherService = weatherService,
+        _locationService = locationService,
         _matchUseCase = matchUseCase;
 
   /// 단일 워크아웃 처리
@@ -126,6 +135,12 @@ class ProcessWorkoutUseCase {
       );
     }
     // completionStatus == 'pending'이면 (50% 미만 달성) 세션 상태를 변경하지 않음
+
+    // 6c. 날씨 컨텍스트 저장 (실패해도 워크아웃 처리는 정상 진행)
+    await _captureWeatherContext(
+      savedWorkout.id,
+      matchResult.session.targetPace,
+    );
 
     return ProcessWorkoutResult(
       savedWorkout: savedWorkout,
@@ -248,6 +263,12 @@ class ProcessWorkoutUseCase {
         );
       }
 
+      // 날씨 컨텍스트 저장
+      await _captureWeatherContext(
+        pair.workout.id,
+        pair.session.targetPace,
+      );
+
       matchedResults.add(ProcessWorkoutResult(
         savedWorkout: pair.workout,
         matchedSession: pair.session,
@@ -271,6 +292,59 @@ class ProcessWorkoutUseCase {
     return BatchProcessResult(
       results: [...duplicates, ...matchedResults, ...unmatchedResults],
     );
+  }
+
+  /// 날씨 컨텍스트를 조회하여 workout_log에 저장
+  ///
+  /// 위치 권한이 없거나 날씨 API 실패 시 무시 (try-catch)
+  Future<void> _captureWeatherContext(
+    String workoutId,
+    String? targetPace,
+  ) async {
+    try {
+      final hasPermission = await _locationService.checkPermission();
+      if (!hasPermission) return;
+
+      var position = await _locationService.getLastKnownPosition();
+      position ??= await _locationService.getCurrentPosition();
+      if (position == null) return;
+
+      final weather = await _weatherService.getCurrentWeather(
+        latitude: position.latitude,
+        longitude: position.longitude,
+      );
+
+      final adjustmentPercent = PaceAdjustment.getAdjustmentPercent(
+        temperatureC: weather.temperatureC,
+        humidityPercent: weather.humidityPercent,
+        windSpeedMs: weather.windSpeedMs,
+      );
+
+      final context = <String, dynamic>{
+        'temperature_c': weather.temperatureC,
+        'humidity_percent': weather.humidityPercent,
+        'wind_speed_ms': weather.windSpeedMs,
+        'condition': weather.conditionDetail,
+        'adjustment_percent': adjustmentPercent,
+      };
+
+      if (targetPace != null && adjustmentPercent > 0) {
+        final (adjustedMin, adjustedMax) = PaceAdjustment.adjustPace(
+          targetPaceRange: targetPace,
+          adjustmentPercent: adjustmentPercent,
+        );
+        context['original_pace'] = targetPace;
+        context['adjusted_pace'] =
+            PaceAdjustment.formatAdjustedPaceRange(adjustedMin, adjustedMax);
+      }
+
+      await _workoutRepository.updateWorkoutLogFields(
+        workoutId,
+        {'weather_context': context},
+      );
+    } catch (_) {
+      // 날씨 조회 실패해도 워크아웃 처리에 영향 없음
+    }
   }
 }
 

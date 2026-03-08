@@ -121,4 +121,28 @@ class CoachingRepository {
   Future<void> deleteMessage(String messageId) async {
     await _table.delete().eq('id', messageId);
   }
+
+  /// 특정 주차의 주간 리뷰 메시지 조회
+  Future<CoachingMessage?> getWeeklyReview(String weekId) async {
+    final response = await _table
+        .select()
+        .eq('week_id', weekId)
+        .eq('message_type', 'weekly_review')
+        .order('created_at', ascending: false)
+        .limit(1)
+        .maybeSingle();
+    return response == null ? null : CoachingMessage.fromJson(response);
+  }
+
+  /// 특정 세션의 날씨 페이스 보정 메시지 조회
+  Future<CoachingMessage?> getWeatherAdjustment(String sessionId) async {
+    final response = await _table
+        .select()
+        .eq('session_id', sessionId)
+        .eq('message_type', 'pace_adjustment')
+        .order('created_at', ascending: false)
+        .limit(1)
+        .maybeSingle();
+    return response == null ? null : CoachingMessage.fromJson(response);
+  }
 }

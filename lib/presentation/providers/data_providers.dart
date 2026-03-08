@@ -12,7 +12,9 @@ import '../../data/repositories/workout_repository.dart';
 import '../../data/services/healthkit_service.dart';
 import '../../data/services/llm/llm_provider.dart';
 import '../../data/services/llm/openai_provider.dart';
+import '../../data/services/location_service.dart';
 import '../../data/services/strava_service.dart';
+import '../../data/services/weather_service.dart';
 import '../../domain/usecases/generate_training_plan.dart';
 import '../../domain/usecases/match_workout_to_session.dart';
 import '../../domain/usecases/process_workout.dart';
@@ -61,6 +63,52 @@ final stravaServiceProvider = Provider<StravaService>((ref) {
   return StravaService(
     supabaseClient: ref.watch(supabaseClientProvider),
   );
+});
+
+// -----------------------------------------------------------------------------
+// Weather & Location Services
+// -----------------------------------------------------------------------------
+
+/// 위치 서비스 인스턴스
+final locationServiceProvider = Provider<LocationService>((ref) {
+  return const LocationService();
+});
+
+/// 날씨 서비스 인스턴스
+final weatherServiceProvider = Provider<WeatherService>((ref) {
+  return WeatherService();
+});
+
+/// 현재 날씨 데이터 (자동으로 위치 가져와서 조회)
+///
+/// 위치 권한이 없거나 API 오류 시 null을 반환합니다.
+final currentWeatherProvider = FutureProvider<WeatherData?>((ref) async {
+  try {
+    final locationService = ref.watch(locationServiceProvider);
+    final weatherService = ref.watch(weatherServiceProvider);
+
+    // 권한 확인 → 없으면 요청
+    final hasPermission = await locationService.checkPermission();
+    if (!hasPermission) {
+      final granted = await locationService.requestPermission();
+      if (!granted) return null;
+    }
+
+    // 먼저 마지막으로 알려진 위치 시도 (빠름)
+    var position = await locationService.getLastKnownPosition();
+
+    // 없으면 현재 위치 조회
+    position ??= await locationService.getCurrentPosition();
+
+    if (position == null) return null;
+
+    return await weatherService.getCurrentWeather(
+      latitude: position.latitude,
+      longitude: position.longitude,
+    );
+  } catch (e) {
+    return null;
+  }
 });
 
 // -----------------------------------------------------------------------------
@@ -173,6 +221,8 @@ final processWorkoutUseCaseProvider =
   return ProcessWorkoutUseCase(
     workoutRepository: ref.watch(workoutRepositoryProvider),
     planRepository: ref.watch(planRepositoryProvider),
+    weatherService: ref.watch(weatherServiceProvider),
+    locationService: ref.watch(locationServiceProvider),
     matchUseCase: ref.watch(matchWorkoutToSessionProvider),
   );
 });
@@ -187,6 +237,77 @@ final workoutLogProvider =
   final workoutRepo = ref.watch(workoutRepositoryProvider);
   return await workoutRepo.getWorkoutLogById(workoutId);
 });
+
+/// 운동 기록 상세 조회 (Strava 상세 데이터 lazy-load 포함)
+///
+/// splits가 없는 Strava 운동의 경우 상세 API를 호출하여
+/// splits, 심박수 시계열, 케이던스를 보강한 후 DB에 저장합니다.
+/// 한번 저장되면 다음 조회부터는 추가 API 호출 없이 DB에서 읽습니다.
+final enrichedWorkoutLogProvider =
+    FutureProvider.family<WorkoutLog?, String>((ref, workoutId) async {
+  final workoutRepo = ref.watch(workoutRepositoryProvider);
+  final workout = await workoutRepo.getWorkoutLogById(workoutId);
+  if (workout == null) return null;
+
+  // Strava 워크아웃이고 상세 데이터가 부족하면 Strava API 재호출
+  // - splits 없음
+  // - heart_rate_data에 altitude_m/velocity_mps 키 없음 (구 포맷)
+  if (workout.source == 'strava' &&
+      workout.externalId != null &&
+      _needsStravaEnrichment(workout)) {
+    try {
+      final stravaService = ref.watch(stravaServiceProvider);
+      final detailedLog = await stravaService.getActivityDetail(
+        userId: workout.userId,
+        activityId: int.parse(workout.externalId!),
+      );
+
+      if (detailedLog != null) {
+        final updates = <String, dynamic>{};
+        if (detailedLog.splits != null) {
+          updates['splits'] = detailedLog.splits;
+        }
+        // 스트림 데이터는 항상 최신으로 덮어쓰기 (superset)
+        if (detailedLog.heartRateData != null) {
+          updates['heart_rate_data'] = detailedLog.heartRateData;
+        }
+        if (detailedLog.avgCadence != null && workout.avgCadence == null) {
+          updates['avg_cadence'] = detailedLog.avgCadence;
+        }
+
+        if (updates.isNotEmpty) {
+          return await workoutRepo.updateWorkoutLogFields(
+              workoutId, updates);
+        }
+      }
+    } catch (_) {
+      // Strava 조회 실패 시 기존 데이터 반환
+    }
+  }
+
+  return workout;
+});
+
+/// Strava enrichment가 필요한지 판단
+///
+/// splits가 없거나, heart_rate_data에 distance_m/altitude_m/velocity_mps 키가
+/// 없으면 Strava API 재호출이 필요합니다.
+bool _needsStravaEnrichment(WorkoutLog workout) {
+  if (workout.splits == null) return true;
+
+  final hrData = workout.heartRateData;
+  if (hrData == null || hrData.isEmpty) return true;
+
+  // 첫 번째 데이터 포인트에 필수 키들이 있는지 확인
+  final firstPoint = hrData.first;
+  if (firstPoint is Map<String, dynamic>) {
+    if (!firstPoint.containsKey('distance_m')) {
+      return true;
+    }
+  }
+
+  return false;
+}
 
 /// 이번 주 운동 기록 목록
 final thisWeekWorkoutLogsProvider =

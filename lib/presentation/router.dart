@@ -18,6 +18,7 @@ import 'plan/plan_create_screen.dart';
 import 'plan/plan_detail_screen.dart';
 import 'plan/plan_screen.dart';
 import 'plan/session_detail_screen.dart';
+import 'plan/weekly_review_screen.dart';
 import 'records/records_screen.dart';
 import 'records/workout_detail_screen.dart';
 
@@ -157,6 +158,15 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/plan/create',
         parentNavigatorKey: _rootNavigatorKey,
         builder: (context, state) => const PlanCreateScreen(),
+      ),
+      // D-3 주간 리뷰
+      GoRoute(
+        path: '/plan/weekly-review/:weekId',
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (context, state) {
+          final weekId = state.pathParameters['weekId']!;
+          return WeeklyReviewScreen(weekId: weekId);
+        },
       ),
       GoRoute(
         path: '/plan/detail/:planId',

@@ -48,16 +48,16 @@ AI 기반 런닝 훈련 코치 모바일 앱. HealthKit/Strava 데이터와 VDOT
 - 장거리런 (Long Run) → 보라
 - 휴식 (Rest) → 회색
 
+### VDOT 및 플랜 생성 로직
+- **VDOT 점수**: 기록증(대회 기록) 기반으로 계산, 프로필에 표시용
+- **플랜 생성 (목표 기록 있음)**: 사용자가 입력한 목표 기록 기반으로 페이스 존 계산 → 훈련표 생성
+- **플랜 생성 (완주 목표, 기록 없음)**: VDOT 점수 기반으로 페이스 존 계산 → 훈련표 생성
+- ⚠️ 플랜 페이스 존은 기록증 VDOT이 아닌 **목표 기록 기준**이 기본값
+
 ### AI/LLM
 - LLM은 반드시 `LLMProvider` 인터페이스를 통해 접근
 - OpenAI에 직접 의존하지 않음
 - 프롬프트 템플릿은 `llm_prompts.dart`에서 관리
-
-### 로딩 UI
-- **콘텐츠 로딩에는 스켈레톤 UI 사용** (화면/카드/리스트가 데이터를 기다릴 때)
-- CircularProgressIndicator는 **액션 로딩**에만 사용 (버튼 클릭 후 처리, 장시간 작업 오버레이)
-- 스켈레톤 위젯: `lib/presentation/common/widgets/skeleton.dart` 사용
-- Apple 스타일 shimmer 애니메이션 적용
 
 ### 코드 컨벤션
 - 파일명: snake_case

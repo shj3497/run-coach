@@ -9,11 +9,13 @@ import '../../core/theme/app_typography.dart';
 import '../../core/utils/pace_formatter.dart';
 import '../../core/utils/time_formatter.dart';
 import '../../data/models/workout_log.dart';
+import '../../data/services/weather_service.dart';
 import '../common/widgets/coaching_message_card.dart';
 import '../common/widgets/skeleton.dart';
 import '../common/widgets/progress_bar.dart';
 import '../common/widgets/training_session_card.dart';
 import '../common/widgets/weather_card.dart';
+import '../providers/data_providers.dart';
 import '../providers/strava_sync_provider.dart';
 import 'providers/home_provider.dart';
 
@@ -124,13 +126,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ),
             const SizedBox(height: AppSpacing.lg),
 
-            // 날씨 카드 (Phase 5 전까지 mock)
-            const WeatherCard(
-              weatherIcon: Icons.wb_sunny_rounded,
-              temperature: '12\u00B0C',
-              condition: '맑음',
-              message: '오늘 날씨 좋아요! 계획대로 뛰세요',
-            ),
+            // 날씨 카드
+            _buildWeatherSection(context, ref),
             const SizedBox(height: AppSpacing.lg),
 
             // 오늘의 훈련 섹션
@@ -379,7 +376,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  /// 최근 운동 기록 리스트 (간략히 표시)
+  /// 최근 운동 기록 리스트 (테이블 형태)
   Widget _buildRecentWorkouts(
     BuildContext context,
     List<WorkoutLog> workouts,
@@ -391,57 +388,181 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         borderRadius: BorderRadius.circular(AppSpacing.cardRadius),
       ),
       child: Column(
-        children: workouts.asMap().entries.map((entry) {
-          final index = entry.key;
-          final workout = entry.value;
-          final date = workout.workoutDate;
-          final dateStr =
-              '${date.month}/${date.day}(${_weekdayShort(date.weekday)})';
-          final paceStr = workout.avgPaceSecondsPerKm != null
-              ? PaceFormatter.toMMSS(workout.avgPaceSecondsPerKm!)
-              : '-';
-
-          return Column(
-            children: [
-              if (index > 0)
-                Divider(
-                  color: AppColors.divider(context),
-                  height: AppSpacing.lg,
-                ),
-              GestureDetector(
-                onTap: () {
-                  context.push('/records/${workout.id}');
-                },
-                behavior: HitTestBehavior.opaque,
-                child: Row(
-                  children: [
-                    Text(
-                      dateStr,
-                      style: AppTypography.bodySmall.copyWith(
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
-                    const SizedBox(width: AppSpacing.md),
-                    Expanded(
-                      child: Text(
-                        '${workout.distanceKm.toStringAsFixed(1)}km  $paceStr/km',
-                        style: AppTypography.body.copyWith(
-                          color: AppColors.textPrimary(context),
-                        ),
-                      ),
-                    ),
-                    const Icon(
-                      Icons.chevron_right_rounded,
+        children: [
+          // 헤더
+          Padding(
+            padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 72,
+                  child: Text(
+                    '날짜',
+                    style: AppTypography.caption.copyWith(
                       color: AppColors.textSecondary,
-                      size: 20,
                     ),
-                  ],
+                  ),
                 ),
-              ),
-            ],
-          );
-        }).toList(),
+                Expanded(
+                  child: Text(
+                    '거리',
+                    style: AppTypography.caption.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+                    textAlign: TextAlign.right,
+                  ),
+                ),
+                Expanded(
+                  child: Text(
+                    '페이스',
+                    style: AppTypography.caption.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+                    textAlign: TextAlign.right,
+                  ),
+                ),
+                Expanded(
+                  child: Text(
+                    '시간',
+                    style: AppTypography.caption.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+                    textAlign: TextAlign.right,
+                  ),
+                ),
+                const SizedBox(width: 20),
+              ],
+            ),
+          ),
+          Divider(
+            color: AppColors.divider(context),
+            height: 1,
+          ),
+          // 데이터 행
+          ...workouts.asMap().entries.map((entry) {
+            final index = entry.key;
+            final workout = entry.value;
+            final date = workout.workoutDate;
+            final dateStr =
+                '${date.month}/${date.day}(${_weekdayShort(date.weekday)})';
+            final distanceStr =
+                '${workout.distanceKm.toStringAsFixed(1)}km';
+            final paceStr = workout.avgPaceSecondsPerKm != null
+                ? '${PaceFormatter.toMMSS(workout.avgPaceSecondsPerKm!)}/km'
+                : '-';
+            final durationStr =
+                TimeFormatter.toReadable(workout.durationSeconds);
+
+            return Column(
+              children: [
+                if (index > 0)
+                  Divider(
+                    color: AppColors.divider(context),
+                    height: 1,
+                  ),
+                GestureDetector(
+                  onTap: () {
+                    context.push('/records/${workout.id}');
+                  },
+                  behavior: HitTestBehavior.opaque,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      vertical: AppSpacing.sm + 2,
+                    ),
+                    child: Row(
+                      children: [
+                        SizedBox(
+                          width: 72,
+                          child: Text(
+                            dateStr,
+                            style: AppTypography.bodySmall.copyWith(
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: Text(
+                            distanceStr,
+                            style: AppTypography.body.copyWith(
+                              color: AppColors.textPrimary(context),
+                              fontWeight: FontWeight.w500,
+                            ),
+                            textAlign: TextAlign.right,
+                          ),
+                        ),
+                        Expanded(
+                          child: Text(
+                            paceStr,
+                            style: AppTypography.body.copyWith(
+                              color: AppColors.textPrimary(context),
+                              fontWeight: FontWeight.w500,
+                            ),
+                            textAlign: TextAlign.right,
+                          ),
+                        ),
+                        Expanded(
+                          child: Text(
+                            durationStr,
+                            style: AppTypography.body.copyWith(
+                              color: AppColors.textPrimary(context),
+                              fontWeight: FontWeight.w500,
+                            ),
+                            textAlign: TextAlign.right,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        const Icon(
+                          Icons.chevron_right_rounded,
+                          color: AppColors.textSecondary,
+                          size: 16,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            );
+          }),
+        ],
       ),
+    );
+  }
+
+  /// 날씨 카드 (실시간 데이터)
+  Widget _buildWeatherSection(BuildContext context, WidgetRef ref) {
+    final weatherAsync = ref.watch(currentWeatherProvider);
+
+    return weatherAsync.when(
+      loading: () => const WeatherCard(
+        weatherEmoji: '🌤️',
+        temperature: '--°C',
+        condition: '날씨 확인 중...',
+        message: '',
+      ),
+      error: (_, __) => const WeatherCard(
+        weatherEmoji: '🌤️',
+        temperature: '--°C',
+        condition: '날씨 정보 없음',
+        message: '위치 권한을 허용하면 날씨 기반 코칭을 받을 수 있어요',
+      ),
+      data: (weather) {
+        if (weather == null) {
+          return const WeatherCard(
+            weatherEmoji: '🌤️',
+            temperature: '--°C',
+            condition: '날씨 정보 없음',
+            message: '위치 권한을 허용하면 날씨 기반 코칭을 받을 수 있어요',
+          );
+        }
+        final emoji = WeatherService.getWeatherEmoji(weather.iconCode);
+        final description = WeatherService.getWeatherDescription(weather);
+        return WeatherCard(
+          weatherEmoji: emoji,
+          temperature: '${weather.temperatureC.toStringAsFixed(0)}°C',
+          condition: weather.conditionDetail,
+          message: description,
+        );
+      },
     );
   }
 

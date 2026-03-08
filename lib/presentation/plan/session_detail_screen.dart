@@ -4,7 +4,11 @@ import '../../core/constants/training_zones.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/theme/app_typography.dart';
+import '../common/widgets/training_session_card.dart';
 import '../common/widgets/training_type_badge.dart';
+import '../common/widgets/weather_adjustment_card.dart';
+import '../providers/coaching_providers.dart';
+import '../providers/data_providers.dart';
 import 'providers/plan_provider.dart';
 
 /// D-1 훈련 세션 상세 화면
@@ -90,8 +94,8 @@ class SessionDetailScreen extends ConsumerWidget {
 
               const SizedBox(height: AppSpacing.lg),
 
-              // 날씨 보정 카드 (Phase 5 전까지는 placeholder)
-              _buildWeatherPlaceholder(context),
+              // 날씨 기반 페이스 보정 카드
+              _buildWeatherAdjustmentSection(context, ref, session),
 
               const SizedBox(height: AppSpacing.lg),
 
@@ -201,37 +205,120 @@ class SessionDetailScreen extends ConsumerWidget {
     );
   }
 
-  /// 날씨 보정 placeholder (Phase 5 전까지)
-  Widget _buildWeatherPlaceholder(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(AppSpacing.cardPadding),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceElevated(context),
-        borderRadius: BorderRadius.circular(AppSpacing.cardRadius),
-        border: Border.all(
-          color: AppColors.divider(context),
-          width: 0.5,
-        ),
+  /// 날씨 기반 페이스 보정 섹션
+  ///
+  /// 세션 날짜에 따라 분기:
+  /// - 오늘 세션 (미완료): 실시간 날씨 보정 표시
+  /// - 완료된 세션 (workout_log 있음): 저장된 보정 이력 표시
+  /// - 미래 세션: 안내 문구
+  /// - 과거 세션 (workout 없음): 미표시
+  Widget _buildWeatherAdjustmentSection(
+    BuildContext context,
+    WidgetRef ref,
+    DaySession session,
+  ) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final sessionDay = DateTime(
+      session.sessionDate.year,
+      session.sessionDate.month,
+      session.sessionDate.day,
+    );
+
+    final isToday = sessionDay == today;
+    final isFuture = sessionDay.isAfter(today);
+    final isCompleted = session.status == SessionStatus.completed ||
+        session.status == SessionStatus.partial;
+
+    // 완료된 세션: 저장된 날씨 컨텍스트 표시
+    if (isCompleted) {
+      return _buildCompletedWeatherSection(context, ref, session);
+    }
+
+    // 오늘 세션 (미완료): 실시간 날씨 보정
+    if (isToday) {
+      return _buildLiveWeatherSection(context, ref, session);
+    }
+
+    // 미래 세션: 안내 문구
+    if (isFuture) {
+      return const WeatherFutureCard();
+    }
+
+    // 과거 세션 (미완료, workout 없음): 미표시
+    return const SizedBox.shrink();
+  }
+
+  /// 실시간 날씨 보정 (오늘 세션용)
+  Widget _buildLiveWeatherSection(
+    BuildContext context,
+    WidgetRef ref,
+    DaySession session,
+  ) {
+    final adjustmentAsync = ref.watch(
+      weatherPaceAdjustmentProvider(
+        (sessionId: session.id, targetPace: session.targetPace),
       ),
-      child: Row(
-        children: [
-          Icon(
-            Icons.thermostat_rounded,
-            size: 24,
-            color: AppColors.textSecondary.withValues(alpha: 0.5),
-          ),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Text(
-              '날씨 기반 페이스 보정은 Phase 5에서 제공됩니다',
-              style: AppTypography.bodySmall.copyWith(
-                color: AppColors.textSecondary,
+    );
+
+    return adjustmentAsync.when(
+      loading: () => Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(AppSpacing.cardPadding),
+        decoration: BoxDecoration(
+          color: AppColors.surfaceElevated(context),
+          borderRadius: BorderRadius.circular(AppSpacing.cardRadius),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              Icons.thermostat_rounded,
+              size: 24,
+              color: AppColors.textSecondary.withValues(alpha: 0.5),
+            ),
+            const SizedBox(width: AppSpacing.md),
+            Expanded(
+              child: Text(
+                '날씨 정보 확인 중...',
+                style: AppTypography.bodySmall.copyWith(
+                  color: AppColors.textSecondary,
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
+      error: (_, __) => const SizedBox.shrink(),
+      data: (result) {
+        if (result == null) return const SizedBox.shrink();
+        return WeatherAdjustmentCard(
+          result: result,
+          originalPace: session.targetPace,
+        );
+      },
+    );
+  }
+
+  /// 완료된 세션의 날씨 이력 표시
+  Widget _buildCompletedWeatherSection(
+    BuildContext context,
+    WidgetRef ref,
+    DaySession session,
+  ) {
+    final workoutAsync = ref.watch(workoutLogBySessionProvider(session.id));
+
+    return workoutAsync.when(
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
+      data: (workout) {
+        if (workout == null || workout.weatherContext == null) {
+          return const SizedBox.shrink();
+        }
+        return WeatherHistoryCard(
+          weatherContext: workout.weatherContext!,
+          actualPaceSecondsPerKm: workout.avgPaceSecondsPerKm,
+        );
+      },
     );
   }
 

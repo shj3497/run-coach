@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import '../../core/utils/pace_adjustment.dart';
 import '../../data/models/coaching_message.dart';
 import '../../data/services/llm/llm_prompts.dart';
 import '../../data/services/llm/llm_provider.dart';
@@ -37,17 +38,22 @@ class GenerateCoachingMessage {
       'plan_name': input.planName,
       if (input.nextWeekPhase != null) 'next_week_phase': input.nextWeekPhase,
       if (input.paceZones != null) 'pace_zones': input.paceZones,
+      if (input.sessionDetails != null) 'session_details': input.sessionDetails,
+      if (input.nextWeekSummary != null)
+        'next_week_summary': input.nextWeekSummary,
     };
 
     final contextJson = const JsonEncoder.withIndent('  ').convert(context);
     final userPrompt = LLMPrompts.weeklyReviewUserPrompt(contextJson);
 
-    final response = await _llmProvider.generate(
+    final response = await _llmProvider.generateJson(
       systemPrompt: LLMPrompts.weeklyReviewSystemPrompt,
       userPrompt: userPrompt,
       temperature: 0.8,
-      maxTokens: 500,
+      maxTokens: 600,
     );
+
+    final content = _formatWeeklyReviewContent(response.content);
 
     return CoachingMessage(
       id: '',
@@ -56,12 +62,54 @@ class GenerateCoachingMessage {
       weekId: input.weekId,
       messageType: 'weekly_review',
       title: '${input.weekNumber}주차 훈련 리뷰',
-      content: response.content,
+      content: content,
       llmModel: response.model,
       llmPromptSnapshot: context,
       tokenUsage: response.tokenUsageToJson(),
       createdAt: DateTime.now(),
     );
+  }
+
+  /// JSON 응답을 읽기 좋은 텍스트로 포맷팅
+  String _formatWeeklyReviewContent(String jsonString) {
+    try {
+      final json = jsonDecode(jsonString) as Map<String, dynamic>;
+      final buffer = StringBuffer();
+
+      final summary = json['summary'] as String? ?? '';
+      if (summary.isNotEmpty) {
+        buffer.writeln(summary);
+        buffer.writeln();
+      }
+
+      final highlights = json['highlights'] as List<dynamic>?;
+      if (highlights != null && highlights.isNotEmpty) {
+        buffer.writeln('잘한 점:');
+        for (final h in highlights) {
+          buffer.writeln('• $h');
+        }
+        buffer.writeln();
+      }
+
+      final improvements = json['improvements'] as List<dynamic>?;
+      if (improvements != null && improvements.isNotEmpty) {
+        buffer.writeln('개선할 점:');
+        for (final i in improvements) {
+          buffer.writeln('• $i');
+        }
+        buffer.writeln();
+      }
+
+      final advice = json['next_week_advice'] as String? ?? '';
+      if (advice.isNotEmpty) {
+        buffer.writeln('다음 주 조언:');
+        buffer.writeln(advice);
+      }
+
+      return buffer.toString().trim();
+    } catch (_) {
+      return jsonString;
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -88,6 +136,14 @@ class GenerateCoachingMessage {
         'actual_duration_minutes':
             (input.actualDurationSeconds! / 60).round(),
       'status': input.completionStatus,
+      if (input.weatherTempC != null)
+        'weather': {
+          'temperature_c': input.weatherTempC,
+          if (input.weatherHumidity != null)
+            'humidity_percent': input.weatherHumidity,
+          if (input.weatherCondition != null)
+            'condition': input.weatherCondition,
+        },
     };
 
     final contextJson = const JsonEncoder.withIndent('  ').convert(context);
@@ -125,6 +181,36 @@ class GenerateCoachingMessage {
   Future<CoachingMessage> generateWeatherAdjustment(
     WeatherAdjustmentInput input,
   ) async {
+    // PaceAdjustment 유틸리티로 보정 비율 계산
+    final adjustmentPercent = PaceAdjustment.getAdjustmentPercent(
+      temperatureC: input.temperatureC,
+      humidityPercent: input.humidityPercent,
+      windSpeedMs: input.windSpeedMs,
+    );
+
+    // 보정된 페이스 범위 계산
+    String? adjustedPaceRange;
+    if (input.targetPace != null && adjustmentPercent > 0) {
+      final (minPace, maxPace) = PaceAdjustment.adjustPace(
+        targetPaceRange: input.targetPace!,
+        adjustmentPercent: adjustmentPercent,
+      );
+      adjustedPaceRange =
+          PaceAdjustment.formatAdjustedPaceRange(minPace, maxPace);
+    }
+
+    final userPrompt = LLMPrompts.buildPaceAdjustmentPrompt(
+      sessionTitle: input.sessionTitle,
+      sessionType: input.sessionType,
+      targetPace: input.targetPace,
+      temperatureC: input.temperatureC,
+      humidity: input.humidityPercent ?? 0,
+      weatherCondition: input.weatherCondition,
+      windSpeedMs: input.windSpeedMs,
+      adjustmentPercent: adjustmentPercent,
+      adjustedPaceRange: adjustedPaceRange,
+    );
+
     final context = {
       'session_title': input.sessionTitle,
       'session_type': input.sessionType,
@@ -135,14 +221,13 @@ class GenerateCoachingMessage {
         'condition': input.weatherCondition,
         if (input.windSpeedMs != null) 'wind_speed_ms': input.windSpeedMs,
       },
+      'adjustment_percent': adjustmentPercent,
+      if (adjustedPaceRange != null) 'adjusted_pace_range': adjustedPaceRange,
     };
-
-    final contextJson = const JsonEncoder.withIndent('  ').convert(context);
 
     final response = await _llmProvider.generate(
       systemPrompt: LLMPrompts.weatherAdjustmentSystemPrompt,
-      userPrompt:
-          '오늘 훈련에 대한 날씨 기반 페이스 보정을 제안해주세요.\n\n$contextJson',
+      userPrompt: userPrompt,
       temperature: 0.7,
       maxTokens: 300,
     );
@@ -188,6 +273,8 @@ class WeeklyReviewInput {
   final WeeklyStats weeklyStats;
   final String? nextWeekPhase;
   final Map<String, dynamic>? paceZones;
+  final List<Map<String, dynamic>>? sessionDetails;
+  final String? nextWeekSummary;
 
   const WeeklyReviewInput({
     required this.userId,
@@ -199,6 +286,8 @@ class WeeklyReviewInput {
     required this.weeklyStats,
     this.nextWeekPhase,
     this.paceZones,
+    this.sessionDetails,
+    this.nextWeekSummary,
   });
 }
 
@@ -215,6 +304,9 @@ class SessionFeedbackInput {
   final int? actualPaceSecondsPerKm;
   final int? actualDurationSeconds;
   final String completionStatus;
+  final double? weatherTempC;
+  final int? weatherHumidity;
+  final String? weatherCondition;
 
   const SessionFeedbackInput({
     required this.userId,
@@ -228,6 +320,9 @@ class SessionFeedbackInput {
     this.actualPaceSecondsPerKm,
     this.actualDurationSeconds,
     required this.completionStatus,
+    this.weatherTempC,
+    this.weatherHumidity,
+    this.weatherCondition,
   });
 }
 

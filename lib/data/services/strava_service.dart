@@ -309,7 +309,7 @@ class StravaService {
         final streamsResponse = await _dio.get(
           '/activities/$activityId/streams',
           queryParameters: {
-            'keys': 'heartrate,cadence,altitude',
+            'keys': 'heartrate,cadence,altitude,velocity_smooth,distance',
             'key_by_type': true,
           },
           options: Options(
@@ -472,30 +472,57 @@ class StravaService {
     );
     if (baseLog == null) return null;
 
-    // Streams에서 심박수 시계열 추출
+    // Streams에서 심박수 + 고도 + 속도 시계열 통합 추출
     List<Map<String, dynamic>>? heartRateData;
-    if (streams != null && streams.containsKey('heartrate')) {
+    if (streams != null) {
       final hrStream = streams['heartrate'] as Map<String, dynamic>?;
       final hrData = hrStream?['data'] as List<dynamic>?;
+      final altStream = streams['altitude'] as Map<String, dynamic>?;
+      final altData = altStream?['data'] as List<dynamic>?;
+      final velStream = streams['velocity_smooth'] as Map<String, dynamic>?;
+      final velData = velStream?['data'] as List<dynamic>?;
+      final distStream = streams['distance'] as Map<String, dynamic>?;
+      final distData = distStream?['data'] as List<dynamic>?;
 
-      if (hrData != null && hrData.isNotEmpty) {
+      // 가장 긴 스트림의 길이 사용
+      final maxLen = [
+        hrData?.length ?? 0,
+        altData?.length ?? 0,
+        velData?.length ?? 0,
+        distData?.length ?? 0,
+      ].reduce((a, b) => a > b ? a : b);
+
+      if (maxLen > 0) {
         final startTime = baseLog.startedAt;
-        // time stream이 있으면 사용, 없으면 인덱스 기반
         final timeStream = streams['time'] as Map<String, dynamic>?;
         final timeData = timeStream?['data'] as List<dynamic>?;
 
         heartRateData = [];
-        for (int i = 0; i < hrData.length; i++) {
+        for (int i = 0; i < maxLen; i++) {
           final secondsOffset =
               (timeData != null && i < timeData.length)
                   ? (timeData[i] as num).toInt()
                   : i;
-          heartRateData.add({
+          final point = <String, dynamic>{
             'timestamp': startTime
                 .add(Duration(seconds: secondsOffset))
                 .toIso8601String(),
-            'bpm': (hrData[i] as num).round(),
-          });
+          };
+
+          if (hrData != null && i < hrData.length) {
+            point['bpm'] = (hrData[i] as num).round();
+          }
+          if (altData != null && i < altData.length) {
+            point['altitude_m'] = (altData[i] as num).toDouble();
+          }
+          if (velData != null && i < velData.length) {
+            point['velocity_mps'] = (velData[i] as num).toDouble();
+          }
+          if (distData != null && i < distData.length) {
+            point['distance_m'] = (distData[i] as num).toDouble();
+          }
+
+          heartRateData.add(point);
         }
       }
     }
@@ -515,11 +542,12 @@ class StravaService {
       }
     }
 
-    // Laps 데이터로 더 정확한 splits 생성
-    final laps = activity['laps'] as List<dynamic>?;
-    final detailedSplits = laps != null
-        ? _convertStravaLapsToSplits(laps)
-        : baseLog.splits;
+    // splits_metric (km별 구간) 우선, 없으면 laps 사용
+    // laps는 자동랩 설정에 따라 1개만 있을 수 있어 km별 데이터로 부적합
+    final splitsMetric = _convertStravaSplits(
+      activity['splits_metric'] as List<dynamic>?,
+    );
+    final detailedSplits = splitsMetric ?? baseLog.splits;
 
     final now = DateTime.now();
 
@@ -599,39 +627,7 @@ class StravaService {
     }).toList();
   }
 
-  /// Strava laps를 splits 형식으로 변환합니다.
-  List<Map<String, dynamic>>? _convertStravaLapsToSplits(
-    List<dynamic> laps,
-  ) {
-    if (laps.isEmpty) return null;
 
-    return laps.asMap().entries.map((entry) {
-      final lap = entry.value as Map<String, dynamic>;
-      final movingTime = lap['moving_time'] as int? ?? 0;
-      final distanceM = (lap['distance'] as num?)?.toDouble() ?? 0;
-      final distanceKm = distanceM / 1000.0;
-
-      final paceSeconds = distanceKm > 0
-          ? (movingTime / distanceKm).round()
-          : movingTime;
-
-      final result = <String, dynamic>{
-        'km': entry.key + 1,
-        'pace_seconds': paceSeconds,
-      };
-
-      if (distanceM < 950) {
-        result['distance_km'] = double.parse(distanceKm.toStringAsFixed(2));
-      }
-
-      final avgHr = lap['average_heartrate'] as num?;
-      if (avgHr != null) {
-        result['avg_heart_rate'] = avgHr.round();
-      }
-
-      return result;
-    }).toList();
-  }
 }
 
 /// Strava 서비스 예외

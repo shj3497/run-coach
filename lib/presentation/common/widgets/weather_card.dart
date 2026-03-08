@@ -4,16 +4,16 @@ import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_typography.dart';
 
 /// 날씨 카드
-/// 날씨 정보 + 페이스 보정 메시지
+/// 날씨 정보 + 러닝 관련 메시지
 class WeatherCard extends StatelessWidget {
-  final IconData weatherIcon;
+  final String weatherEmoji;
   final String temperature;
   final String condition;
   final String message;
 
   const WeatherCard({
     super.key,
-    required this.weatherIcon,
+    required this.weatherEmoji,
     required this.temperature,
     required this.condition,
     required this.message,
@@ -29,10 +29,9 @@ class WeatherCard extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(
-            weatherIcon,
-            size: 32,
-            color: AppColors.warning,
+          Text(
+            weatherEmoji,
+            style: const TextStyle(fontSize: 28),
           ),
           const SizedBox(width: AppSpacing.md),
           Expanded(

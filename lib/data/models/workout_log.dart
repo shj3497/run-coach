@@ -24,6 +24,7 @@ class WorkoutLog {
   final int? weatherHumidity;
   final String? weatherCondition;
   final String? memo;
+  final Map<String, dynamic>? weatherContext;
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -51,6 +52,7 @@ class WorkoutLog {
     this.weatherHumidity,
     this.weatherCondition,
     this.memo,
+    this.weatherContext,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -80,6 +82,9 @@ class WorkoutLog {
         weatherHumidity: json['weather_humidity'] as int?,
         weatherCondition: json['weather_condition'] as String?,
         memo: json['memo'] as String?,
+        weatherContext: json['weather_context'] != null
+            ? Map<String, dynamic>.from(json['weather_context'] as Map)
+            : null,
         createdAt: DateTime.parse(json['created_at'] as String),
         updatedAt: DateTime.parse(json['updated_at'] as String),
       );
@@ -107,5 +112,6 @@ class WorkoutLog {
         'weather_humidity': weatherHumidity,
         'weather_condition': weatherCondition,
         'memo': memo,
+        'weather_context': weatherContext,
       };
 }

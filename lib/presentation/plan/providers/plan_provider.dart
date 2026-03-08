@@ -61,6 +61,7 @@ class DaySession {
   final SessionStatus status;
   final String? description;
   final Map<String, dynamic>? workoutDetail;
+  final DateTime sessionDate;
 
   const DaySession({
     required this.id,
@@ -73,6 +74,7 @@ class DaySession {
     this.status = SessionStatus.pending,
     this.description,
     this.workoutDetail,
+    required this.sessionDate,
   });
 
   String get dayLabel {
@@ -242,6 +244,7 @@ class PlanNotifier extends StateNotifier<PlanScreenState> {
       status: status,
       description: s.description,
       workoutDetail: s.workoutDetail,
+      sessionDate: s.sessionDate,
     );
   }
 
