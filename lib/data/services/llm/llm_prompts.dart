@@ -86,7 +86,31 @@ class LLMPrompts {
     buffer.writeln(
         '            "type": "steady | intervals | tempo | progression",');
     buffer.writeln(
-        '            "pace_range": {"min": "해당 존 페이스", "max": "해당 존 페이스"}');
+        '            "pace_range": {"min": "해당 존 페이스", "max": "해당 존 페이스"},');
+    buffer.writeln('');
+    buffer.writeln(
+        '            // tempo (threshold/marathon_pace)인 경우 아래 필드 필수:');
+    buffer.writeln(
+        '            "warmup": {"distance_km": 1.5, "pace": "E존 페이스"},');
+    buffer.writeln(
+        '            "main": {"distance_km": 5.0, "pace": "T존 또는 M존 페이스"},');
+    buffer.writeln(
+        '            "cooldown": {"distance_km": 1.5, "pace": "E존 페이스"},');
+    buffer.writeln('');
+    buffer.writeln(
+        '            // intervals (interval/repetition)인 경우 아래 필드 필수:');
+    buffer.writeln(
+        '            "warmup": {"distance_km": 1.5, "pace": "E존 페이스"},');
+    buffer.writeln('            "intervals": [');
+    buffer.writeln('              {');
+    buffer.writeln(
+        '                "reps": 5, "distance_m": 1000, "pace": "I존 또는 R존 페이스",');
+    buffer.writeln(
+        '                "rest_m": 400, "rest_pace": "E존 페이스"');
+    buffer.writeln('              }');
+    buffer.writeln('            ],');
+    buffer.writeln(
+        '            "cooldown": {"distance_km": 1.0, "pace": "E존 페이스"}');
     buffer.writeln('          }');
     buffer.writeln('        }');
     buffer.writeln('      ]');
@@ -102,6 +126,28 @@ class LLMPrompts {
     buffer.writeln('- 각 주에는 정확히 주당 훈련일수만큼의 세션만 포함');
     buffer.writeln(
         '- workout_detail.type: easy/recovery→"steady", marathon_pace/threshold→"tempo", interval/repetition→"intervals", long_run→"steady" 또는 "progression"');
+    buffer.writeln(
+        '- [필수] threshold/marathon_pace 세션의 workout_detail에는 반드시 warmup, main, cooldown 필드를 포함하세요:');
+    buffer.writeln(
+        '  · warmup: {"distance_km": 워밍업거리, "pace": "E존 페이스"}');
+    buffer.writeln(
+        '  · main: {"distance_km": 메인구간거리, "pace": "T존 또는 M존 페이스"}');
+    buffer.writeln(
+        '  · cooldown: {"distance_km": 쿨다운거리, "pace": "E존 페이스"}');
+    buffer.writeln(
+        '  · target_distance_km = warmup.distance_km + main.distance_km + cooldown.distance_km');
+    buffer.writeln(
+        '- [필수] interval/repetition 세션의 workout_detail에는 반드시 warmup, intervals, cooldown 필드를 포함하세요:');
+    buffer.writeln(
+        '  · warmup: {"distance_km": 워밍업거리, "pace": "E존 페이스"}');
+    buffer.writeln(
+        '  · intervals: [{"reps": 반복횟수, "distance_m": 거리(m), "pace": "I/R존 페이스", "rest_m": 회복거리(m), "rest_pace": "E존 페이스"}]');
+    buffer.writeln(
+        '  · cooldown: {"distance_km": 쿨다운거리, "pace": "E존 페이스"}');
+    buffer.writeln(
+        '  · 회복(rest)은 reps-1회 (인터벌 사이에만 존재)');
+    buffer.writeln(
+        '  · target_distance_km = warmup + (distance_m x reps + rest_m x (reps-1)) / 1000 + cooldown');
     buffer.writeln('- description은 1문장으로 간결하게');
     buffer.writeln('- 모든 설명은 한국어로');
     buffer.writeln(

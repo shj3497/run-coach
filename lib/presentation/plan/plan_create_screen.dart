@@ -9,6 +9,7 @@ import '../../data/models/training_session.dart';
 import '../../domain/usecases/generate_training_plan.dart';
 import '../auth/providers/auth_providers.dart';
 import '../onboarding/widgets/date_picker_field.dart';
+import '../onboarding/widgets/day_selector.dart';
 import '../onboarding/widgets/distance_selector.dart';
 import '../onboarding/widgets/time_picker_field.dart';
 import '../providers/data_providers.dart';
@@ -29,9 +30,27 @@ class _PlanCreateScreenState extends ConsumerState<PlanCreateScreen> {
   double? _distanceKm;
   int? _goalTimeSeconds;
   bool _justFinish = false;
+  int _trainingDaysPerWeek = 3;
   int _trainingWeeks = 12;
   bool _isLoading = false;
   String _statusMessage = '';
+
+  @override
+  void initState() {
+    super.initState();
+    // 프로필에 저장된 주당 훈련일수를 초기값으로
+    Future.microtask(() async {
+      final user = ref.read(currentUserProvider);
+      if (user == null) return;
+      final userRepo = ref.read(userRepositoryProvider);
+      final profile = await userRepo.getProfile(user.id);
+      if (profile?.weeklyAvailableDays != null && mounted) {
+        setState(() {
+          _trainingDaysPerWeek = profile!.weeklyAvailableDays!;
+        });
+      }
+    });
+  }
 
   @override
   void dispose() {
@@ -81,7 +100,6 @@ class _PlanCreateScreenState extends ConsumerState<PlanCreateScreen> {
       final userRepo = ref.read(userRepositoryProvider);
       final profile = await userRepo.getProfile(user.id);
       final experience = profile?.runningExperience ?? 'beginner';
-      final trainingDaysPerWeek = profile?.weeklyAvailableDays ?? 3;
 
       double vdot;
       final goalTime = _justFinish ? null : _goalTimeSeconds;
@@ -114,11 +132,11 @@ class _PlanCreateScreenState extends ConsumerState<PlanCreateScreen> {
             : null,
         goalRaceDate: _raceDate,
         totalWeeks: _trainingWeeks,
-        trainingDaysPerWeek: trainingDaysPerWeek,
+        trainingDaysPerWeek: _trainingDaysPerWeek,
         startDate: startDate,
         endDate: endDate,
         runningExperience: experience,
-        weeklyAvailableDays: trainingDaysPerWeek,
+        weeklyAvailableDays: _trainingDaysPerWeek,
       );
 
       // 4. 입력 검증
@@ -336,6 +354,17 @@ class _PlanCreateScreenState extends ConsumerState<PlanCreateScreen> {
                         ),
                       ],
                     ),
+                  ),
+                  const SizedBox(height: AppSpacing.xl),
+
+                  // 주당 훈련일수
+                  _buildLabel(context, '주당 훈련일수'),
+                  const SizedBox(height: AppSpacing.sm),
+                  DaySelector(
+                    selectedDays: _trainingDaysPerWeek,
+                    onChanged: (days) =>
+                        setState(() => _trainingDaysPerWeek = days),
+                    maxDays: 7,
                   ),
                   const SizedBox(height: AppSpacing.xl),
 

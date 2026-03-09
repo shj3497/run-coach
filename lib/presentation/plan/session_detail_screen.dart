@@ -1,9 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import '../../core/constants/training_zones.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/theme/app_typography.dart';
+import '../../core/utils/pace_formatter.dart';
+import '../../core/utils/time_formatter.dart';
+import '../../data/models/workout_log.dart';
+import '../common/widgets/stat_card.dart';
 import '../common/widgets/training_session_card.dart';
 import '../common/widgets/training_type_badge.dart';
 import '../common/widgets/weather_adjustment_card.dart';
@@ -92,6 +97,12 @@ class SessionDetailScreen extends ConsumerWidget {
               // 목표 카드
               _buildGoalCard(context, session),
 
+              // 워크아웃 구성 (상세 구간이 있을 때만)
+              if (_hasWorkoutStructure(session.workoutDetail)) ...[
+                const SizedBox(height: AppSpacing.lg),
+                _buildWorkoutDetail(context, session),
+              ],
+
               const SizedBox(height: AppSpacing.lg),
 
               // 날씨 기반 페이스 보정 카드
@@ -102,16 +113,10 @@ class SessionDetailScreen extends ConsumerWidget {
               // 코치 설명
               _buildCoachDescription(context, session),
 
-              // 인터벌인 경우 워크아웃 상세
-              if (session.workoutDetail != null) ...[
-                const SizedBox(height: AppSpacing.lg),
-                _buildWorkoutDetail(context, session),
-              ],
-
               const SizedBox(height: AppSpacing.lg),
 
-              // 실제 운동 기록 영역 (Phase 4 이후)
-              _buildActualRecordPlaceholder(context),
+              // 실제 운동 기록 영역
+              _buildActualRecordSection(context, ref, session),
 
               const SizedBox(height: AppSpacing.xxl),
             ],
@@ -150,8 +155,10 @@ class SessionDetailScreen extends ConsumerWidget {
               value: '${session.distanceKm!.toStringAsFixed(0)}km',
             ),
 
-          // 페이스
-          if (session.targetPace != null) ...[
+          // 페이스 (인터벌/반복은 워크아웃 구성에서 상세 표시)
+          if (session.targetPace != null &&
+              session.zoneType != TrainingZoneType.interval &&
+              session.zoneType != TrainingZoneType.repetition) ...[
             const SizedBox(height: AppSpacing.sm),
             _buildGoalRow(
               context,
@@ -367,12 +374,29 @@ class SessionDetailScreen extends ConsumerWidget {
     );
   }
 
-  /// 인터벌 워크아웃 상세
+  /// 워크아웃 상세 (템포/인터벌 모두 지원)
   Widget _buildWorkoutDetail(BuildContext context, DaySession session) {
     final detail = session.workoutDetail!;
     final warmup = detail['warmup'] as Map<String, dynamic>?;
+    final main = detail['main'] as Map<String, dynamic>?;
     final intervals = detail['intervals'] as List<dynamic>?;
     final cooldown = detail['cooldown'] as Map<String, dynamic>?;
+
+    // 메인 구간의 컬러/라벨 결정
+    final mainColor = switch (session.zoneType) {
+      TrainingZoneType.threshold => TrainingZones.thresholdColor,
+      TrainingZoneType.marathon => TrainingZones.marathonColor,
+      TrainingZoneType.interval => TrainingZones.intervalColor,
+      TrainingZoneType.repetition => TrainingZones.repetitionColor,
+      _ => TrainingZones.easyColor,
+    };
+    final mainLabel = switch (session.zoneType) {
+      TrainingZoneType.threshold => '템포런',
+      TrainingZoneType.marathon => '마라톤페이스',
+      TrainingZoneType.interval => '인터벌',
+      TrainingZoneType.repetition => '반복달리기',
+      _ => '메인',
+    };
 
     return Container(
       width: double.infinity,
@@ -397,9 +421,22 @@ class SessionDetailScreen extends ConsumerWidget {
             _buildWorkoutPhase(
               context,
               phase: '워밍업',
-              detail: '${warmup['distance_km']}km @ ${warmup['pace']}/km',
+              detail:
+                  '${warmup['distance_km']}km @ ${_formatPace(warmup['pace'])}',
               color: TrainingZones.easyColor,
             ),
+
+          // 메인 구간 (템포/마라톤페이스)
+          if (main != null) ...[
+            const SizedBox(height: AppSpacing.sm),
+            _buildWorkoutPhase(
+              context,
+              phase: mainLabel,
+              detail:
+                  '${main['distance_km']}km @ ${_formatPace(main['pace'])}',
+              color: mainColor,
+            ),
+          ],
 
           // 인터벌 세트
           if (intervals != null)
@@ -407,10 +444,10 @@ class SessionDetailScreen extends ConsumerWidget {
               const SizedBox(height: AppSpacing.sm),
               _buildWorkoutPhase(
                 context,
-                phase: '인터벌',
+                phase: mainLabel,
                 detail:
-                    '${interval['reps']}x${interval['distance_m']}m @ ${interval['pace']}/km\n리커버리: ${interval['rest_m']}m @ ${interval['rest_pace']}/km',
-                color: TrainingZones.intervalColor,
+                    '${interval['reps']}x${interval['distance_m']}m @ ${_formatPace(interval['pace'])}\n리커버리: ${interval['rest_m']}m @ ${_formatPace(interval['rest_pace'])}',
+                color: mainColor,
               ),
             ],
 
@@ -420,7 +457,8 @@ class SessionDetailScreen extends ConsumerWidget {
             _buildWorkoutPhase(
               context,
               phase: '쿨다운',
-              detail: '${cooldown['distance_km']}km @ ${cooldown['pace']}/km',
+              detail:
+                  '${cooldown['distance_km']}km @ ${_formatPace(cooldown['pace'])}',
               color: TrainingZones.easyColor,
             ),
           ],
@@ -474,8 +512,26 @@ class SessionDetailScreen extends ConsumerWidget {
     );
   }
 
-  /// 실제 운동 기록 영역 placeholder (Phase 4 이후)
-  Widget _buildActualRecordPlaceholder(BuildContext context) {
+  /// 실제 운동 기록 섹션
+  Widget _buildActualRecordSection(
+    BuildContext context,
+    WidgetRef ref,
+    DaySession session,
+  ) {
+    final workoutAsync = ref.watch(workoutLogBySessionProvider(session.id));
+
+    return workoutAsync.when(
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
+      data: (workout) {
+        if (workout == null) return _buildNoRecordPlaceholder(context);
+        return _buildActualRecordCard(context, session, workout);
+      },
+    );
+  }
+
+  /// 기록 없음 placeholder
+  Widget _buildNoRecordPlaceholder(BuildContext context) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(AppSpacing.cardPadding),
@@ -512,6 +568,260 @@ class SessionDetailScreen extends ConsumerWidget {
         ],
       ),
     );
+  }
+
+  /// 실제 운동 기록 카드 (탭하면 워크아웃 상세로 이동)
+  Widget _buildActualRecordCard(
+    BuildContext context,
+    DaySession session,
+    WorkoutLog workout,
+  ) {
+    final paceStr = workout.avgPaceSecondsPerKm != null
+        ? PaceFormatter.toMMSS(workout.avgPaceSecondsPerKm!)
+        : '-';
+    final durationStr = TimeFormatter.toReadable(workout.durationSeconds);
+
+    return GestureDetector(
+      onTap: () => context.push('/records/${workout.id}'),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(AppSpacing.cardPadding),
+        decoration: BoxDecoration(
+          color: AppColors.surface(context),
+          borderRadius: BorderRadius.circular(AppSpacing.cardRadius),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 헤더: 제목 + 소스 + 화살표
+            Row(
+              children: [
+                Icon(
+                  Icons.directions_run_rounded,
+                  size: 20,
+                  color: AppColors.primary(context),
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Text(
+                  '실제 운동 기록',
+                  style: AppTypography.h3.copyWith(
+                    color: AppColors.textPrimary(context),
+                  ),
+                ),
+                const Spacer(),
+                // 데이터 소스
+                if (workout.source == 'strava') ...[
+                  Text(
+                    'Strava',
+                    style: AppTypography.caption.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  const Text('\u{1F536}', style: TextStyle(fontSize: 10)),
+                ] else ...[
+                  Text(
+                    'HealthKit',
+                    style: AppTypography.caption.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  const Icon(
+                    Icons.favorite,
+                    color: AppColors.error,
+                    size: 12,
+                  ),
+                ],
+                const SizedBox(width: AppSpacing.sm),
+                const Icon(
+                  Icons.chevron_right_rounded,
+                  size: 20,
+                  color: AppColors.textSecondary,
+                ),
+              ],
+            ),
+
+            const SizedBox(height: AppSpacing.md),
+
+            // 핵심 지표 2x2
+            Row(
+              children: [
+                Expanded(
+                  child: StatCard(
+                    label: '거리',
+                    value: workout.distanceKm.toStringAsFixed(1),
+                    unit: 'km',
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: StatCard(
+                    label: '시간',
+                    value: durationStr,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Row(
+              children: [
+                Expanded(
+                  child: StatCard(
+                    label: '평균 페이스',
+                    value: paceStr,
+                    unit: workout.avgPaceSecondsPerKm != null ? '/km' : '',
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: StatCard(
+                    label: '평균 심박수',
+                    value: workout.avgHeartRate != null
+                        ? '${workout.avgHeartRate}'
+                        : '-',
+                    unit: workout.avgHeartRate != null ? 'bpm' : '',
+                  ),
+                ),
+              ],
+            ),
+
+            // 목표 대비 달성률
+            if (session.distanceKm != null && session.distanceKm! > 0) ...[
+              const SizedBox(height: AppSpacing.md),
+              _buildAchievementRow(
+                context,
+                targetKm: session.distanceKm!,
+                actualKm: workout.distanceKm,
+              ),
+            ],
+
+            // 추가 정보 (있을 때만)
+            if (workout.totalCalories != null ||
+                workout.totalElevationGainM != null ||
+                workout.avgCadence != null) ...[
+              const SizedBox(height: AppSpacing.md),
+              Divider(color: AppColors.divider(context), height: 1),
+              const SizedBox(height: AppSpacing.md),
+              Wrap(
+                spacing: AppSpacing.lg,
+                runSpacing: AppSpacing.sm,
+                children: [
+                  if (workout.totalCalories != null)
+                    _buildMiniStat(
+                      context,
+                      icon: Icons.local_fire_department_rounded,
+                      label: '${workout.totalCalories} kcal',
+                    ),
+                  if (workout.totalElevationGainM != null)
+                    _buildMiniStat(
+                      context,
+                      icon: Icons.terrain_rounded,
+                      label:
+                          '${workout.totalElevationGainM!.toStringAsFixed(0)}m',
+                    ),
+                  if (workout.avgCadence != null)
+                    _buildMiniStat(
+                      context,
+                      icon: Icons.speed_rounded,
+                      label: '${workout.avgCadence} spm',
+                    ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 목표 대비 달성률 행
+  Widget _buildAchievementRow(
+    BuildContext context, {
+    required double targetKm,
+    required double actualKm,
+  }) {
+    final ratio = actualKm / targetKm;
+    final percent = (ratio * 100).round();
+
+    final Color color;
+    final String statusText;
+    final IconData icon;
+
+    if (ratio >= 0.8) {
+      color = AppColors.success;
+      statusText = '달성';
+      icon = Icons.check_circle_rounded;
+    } else if (ratio >= 0.5) {
+      color = AppColors.warning;
+      statusText = '부분 달성';
+      icon = Icons.remove_circle_rounded;
+    } else {
+      color = AppColors.textSecondary;
+      statusText = '미달성';
+      icon = Icons.cancel_rounded;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.sm,
+      ),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(AppSpacing.sm),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: color),
+          const SizedBox(width: AppSpacing.xs),
+          Text(
+            '목표 대비: 거리 $percent% $statusText',
+            style: AppTypography.bodySmall.copyWith(
+              color: color,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 추가 정보 미니 스탯
+  Widget _buildMiniStat(
+    BuildContext context, {
+    required IconData icon,
+    required String label,
+  }) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 16, color: AppColors.textSecondary),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: AppTypography.bodySmall.copyWith(
+            color: AppColors.textSecondary,
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// warmup/main/intervals 중 하나라도 있으면 워크아웃 구성 표시
+  bool _hasWorkoutStructure(Map<String, dynamic>? detail) {
+    if (detail == null) return false;
+    return detail.containsKey('warmup') ||
+        detail.containsKey('main') ||
+        detail.containsKey('intervals');
+  }
+
+  /// LLM이 "5:34/km" 또는 "5:34" 어느 형태로든 줄 수 있으므로 정규화
+  String _formatPace(dynamic pace) {
+    final s = pace?.toString() ?? '';
+    if (s.contains('/km')) return s;
+    return '$s/km';
   }
 
   String _getDefaultDescription(TrainingZoneType zoneType) {
