@@ -28,6 +28,15 @@ class PlanRepository {
     return response == null ? null : TrainingPlan.fromJson(response);
   }
 
+  /// 플랜 ID로 단일 플랜 조회
+  Future<TrainingPlan?> getPlanById(String planId) async {
+    final response = await _plansTable
+        .select()
+        .eq('id', planId)
+        .maybeSingle();
+    return response == null ? null : TrainingPlan.fromJson(response);
+  }
+
   /// 사용자의 전체 플랜 목록 (최신순)
   Future<List<TrainingPlan>> getUserPlans(String userId) async {
     final response = await _plansTable

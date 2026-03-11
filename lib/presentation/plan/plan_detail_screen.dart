@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import '../../core/constants/training_zones.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/theme/app_typography.dart';
 import '../../core/utils/time_formatter.dart';
+import '../../core/utils/vdot_calculator.dart';
 import '../../data/models/training_plan.dart';
+import '../providers/data_providers.dart';
 import 'providers/plan_provider.dart';
 
 /// D-6 플랜 상세/관리 화면
@@ -17,23 +18,58 @@ class PlanDetailScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // 활성 플랜이면 planProvider에서, 아니면 planByIdProvider로 조회
     final planState = ref.watch(planProvider);
-    final plan = planState.activePlan;
+    final activePlan = planState.activePlan;
+    final bool isActivePlan = activePlan != null && activePlan.id == planId;
 
-    if (plan == null || plan.id != planId) {
-      return Scaffold(
+    if (isActivePlan) {
+      return _buildContent(context, ref, activePlan);
+    }
+
+    // 비활성 플랜 (취소/완료/대기) — DB에서 직접 조회
+    final planAsync = ref.watch(planByIdProvider(planId));
+
+    return planAsync.when(
+      loading: () => Scaffold(
+        backgroundColor: AppColors.background(context),
+        appBar: AppBar(backgroundColor: AppColors.background(context)),
+        body: const Center(child: CircularProgressIndicator()),
+      ),
+      error: (_, __) => Scaffold(
         backgroundColor: AppColors.background(context),
         appBar: AppBar(backgroundColor: AppColors.background(context)),
         body: Center(
           child: Text(
-            '플랜을 찾을 수 없습니다',
+            '플랜을 불러오는데 실패했습니다',
             style: AppTypography.body.copyWith(
               color: AppColors.textSecondary,
             ),
           ),
         ),
-      );
-    }
+      ),
+      data: (plan) {
+        if (plan == null) {
+          return Scaffold(
+            backgroundColor: AppColors.background(context),
+            appBar: AppBar(backgroundColor: AppColors.background(context)),
+            body: Center(
+              child: Text(
+                '플랜을 찾을 수 없습니다',
+                style: AppTypography.body.copyWith(
+                  color: AppColors.textSecondary,
+                ),
+              ),
+            ),
+          );
+        }
+        return _buildContent(context, ref, plan);
+      },
+    );
+  }
+
+  Widget _buildContent(BuildContext context, WidgetRef ref, TrainingPlan plan) {
+    final isActive = plan.status == 'active';
 
     return Scaffold(
       backgroundColor: AppColors.background(context),
@@ -60,59 +96,67 @@ class PlanDetailScreen extends ConsumerWidget {
                 case 'complete':
                   _showConfirmDialog(
                     context,
+                    ref: ref,
                     title: '플랜 완료',
                     message: '이 플랜을 완료 처리하시겠습니까?',
-                    onConfirm: () {
-                      // TODO: 플랜 완료 처리
-                      context.pop();
+                    onConfirm: () async {
+                      await ref.read(planProvider.notifier).completePlan(plan.id);
+                      if (context.mounted) context.pop();
                     },
                   );
                   break;
                 case 'cancel':
                   _showConfirmDialog(
                     context,
+                    ref: ref,
                     title: '플랜 취소',
                     message: '이 플랜을 취소하시겠습니까? 취소된 플랜은 복구할 수 없습니다.',
                     isDestructive: true,
-                    onConfirm: () {
-                      // TODO: 플랜 취소 처리
-                      context.pop();
+                    onConfirm: () async {
+                      await ref.read(planProvider.notifier).cancelPlan(plan.id);
+                      if (context.mounted) context.pop();
                     },
                   );
                   break;
                 case 'delete':
                   _showConfirmDialog(
                     context,
+                    ref: ref,
                     title: '플랜 삭제',
                     message: '이 플랜을 삭제하시겠습니까? 삭제된 플랜은 복구할 수 없습니다.',
                     isDestructive: true,
-                    onConfirm: () {
-                      // TODO: 플랜 삭제 처리
-                      context.pop();
+                    onConfirm: () async {
+                      await ref.read(planProvider.notifier).deletePlan(plan.id);
+                      ref.invalidate(userPlansProvider);
+                      if (context.mounted) context.pop();
                     },
                   );
                   break;
               }
             },
             itemBuilder: (context) => [
-              PopupMenuItem(
-                value: 'complete',
-                child: Text(
-                  '플랜 완료',
-                  style: AppTypography.body.copyWith(
-                    color: AppColors.textPrimary(context),
+              // 활성 플랜만 완료/취소 가능
+              if (isActive) ...[
+                PopupMenuItem(
+                  value: 'complete',
+                  child: Text(
+                    '플랜 완료',
+                    style: AppTypography.body.copyWith(
+                      color: AppColors.textPrimary(context),
+                    ),
                   ),
                 ),
-              ),
-              PopupMenuItem(
-                value: 'cancel',
-                child: Text(
-                  '플랜 취소',
-                  style: AppTypography.body.copyWith(
-                    color: AppColors.warning,
+                PopupMenuItem(
+                  value: 'cancel',
+                  child: Text(
+                    '플랜 취소',
+                    style: AppTypography.body.copyWith(
+                      color: AppColors.warning,
+                    ),
                   ),
                 ),
-              ),
+              ],
+              // 삭제는 항상 가능
               PopupMenuItem(
                 value: 'delete',
                 child: Text(
@@ -149,9 +193,6 @@ class PlanDetailScreen extends ConsumerWidget {
                 _buildPaceZonesCard(context, plan),
                 const SizedBox(height: AppSpacing.lg),
               ],
-
-              // 플랜 진행 상태
-              _buildProgressCard(context, planState),
 
               const SizedBox(height: AppSpacing.xxl),
             ],
@@ -256,7 +297,26 @@ class PlanDetailScreen extends ConsumerWidget {
 
   /// 페이스 존 카드
   Widget _buildPaceZonesCard(BuildContext context, TrainingPlan plan) {
-    final paceZones = plan.paceZones!;
+    final PaceZones paceZones;
+    try {
+      paceZones = PaceZones.fromJson(plan.paceZones!);
+    } catch (_) {
+      return const SizedBox.shrink();
+    }
+
+    String formatPace(int secondsPerKm) {
+      final m = secondsPerKm ~/ 60;
+      final s = secondsPerKm % 60;
+      return '$m:${s.toString().padLeft(2, '0')}/km';
+    }
+
+    final zones = [
+      (label: '이지런', color: const Color(0xFF34C759), pace: '${formatPace(paceZones.easyFastPace)} ~ ${formatPace(paceZones.easySlowPace)}'),
+      (label: '마라톤페이스', color: const Color(0xFF007AFF), pace: formatPace(paceZones.marathonPace)),
+      (label: '템포런', color: const Color(0xFFFF9F0A), pace: formatPace(paceZones.thresholdPace)),
+      (label: '인터벌', color: const Color(0xFFFF6B35), pace: formatPace(paceZones.intervalPace)),
+      (label: '반복달리기', color: const Color(0xFFFF3B30), pace: formatPace(paceZones.repetitionPace)),
+    ];
 
     return Container(
       width: double.infinity,
@@ -275,112 +335,40 @@ class PlanDetailScreen extends ConsumerWidget {
             ),
           ),
           const SizedBox(height: AppSpacing.md),
-          ...paceZones.entries.map((entry) {
-            final zoneType = trainingZoneTypeFromDbString(entry.key);
-            final zone = TrainingZones.fromType(zoneType);
-            final paceValue = entry.value?.toString() ?? '';
-            return Padding(
-              padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-              child: _buildPaceZoneRow(
-                context,
-                zone: zone,
-                pace: paceValue,
-              ),
-            );
-          }),
-        ],
-      ),
-    );
-  }
-
-  /// 페이스 존 행
-  Widget _buildPaceZoneRow(
-    BuildContext context, {
-    required TrainingZone zone,
-    required String pace,
-  }) {
-    return Row(
-      children: [
-        Container(
-          width: 12,
-          height: 12,
-          decoration: BoxDecoration(
-            color: zone.color,
-            shape: BoxShape.circle,
-          ),
-        ),
-        const SizedBox(width: AppSpacing.sm),
-        SizedBox(
-          width: 80,
-          child: Text(
-            zone.shortLabel,
-            style: AppTypography.body.copyWith(
-              color: AppColors.textPrimary(context),
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ),
-        Expanded(
-          child: Text(
-            pace,
-            style: AppTypography.body.copyWith(
-              color: AppColors.textSecondary,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  /// 플랜 진행 상태 카드
-  Widget _buildProgressCard(
-    BuildContext context,
-    PlanScreenState planState,
-  ) {
-    final totalWeeks = planState.weeks.length;
-    final completedWeeks = planState.currentWeekIndex; // 현재 주차 이전까지 완료
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(AppSpacing.cardPadding),
-      decoration: BoxDecoration(
-        color: AppColors.surface(context),
-        borderRadius: BorderRadius.circular(AppSpacing.cardRadius),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '진행 상태',
-            style: AppTypography.h3.copyWith(
-              color: AppColors.textPrimary(context),
-            ),
-          ),
-          const SizedBox(height: AppSpacing.md),
-          _buildInfoRow(
-            context,
-            icon: Icons.flag_rounded,
-            label: '현재',
-            value: '$totalWeeks주 중 ${completedWeeks + 1}주차 진행 중',
-          ),
-          const SizedBox(height: AppSpacing.md),
-
-          // 간단한 진행 바
-          ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: SizedBox(
-              height: 8,
-              child: LinearProgressIndicator(
-                value: totalWeeks > 0
-                    ? (completedWeeks + 1) / totalWeeks
-                    : 0,
-                backgroundColor: AppColors.surfaceElevated(context),
-                valueColor: AlwaysStoppedAnimation<Color>(
-                  AppColors.primary(context),
+          ...zones.map((z) => Padding(
+            padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+            child: Row(
+              children: [
+                Container(
+                  width: 12,
+                  height: 12,
+                  decoration: BoxDecoration(
+                    color: z.color,
+                    shape: BoxShape.circle,
+                  ),
                 ),
-              ),
+                const SizedBox(width: AppSpacing.sm),
+                SizedBox(
+                  width: 90,
+                  child: Text(
+                    z.label,
+                    style: AppTypography.body.copyWith(
+                      color: AppColors.textPrimary(context),
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: Text(
+                    z.pace,
+                    style: AppTypography.body.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ),
+          )),
         ],
       ),
     );
@@ -462,9 +450,10 @@ class PlanDetailScreen extends ConsumerWidget {
 
   void _showConfirmDialog(
     BuildContext context, {
+    required WidgetRef ref,
     required String title,
     required String message,
-    required VoidCallback onConfirm,
+    required Future<void> Function() onConfirm,
     bool isDestructive = false,
   }) {
     showDialog(

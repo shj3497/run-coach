@@ -92,6 +92,16 @@ class _PlanCreateScreenState extends ConsumerState<PlanCreateScreen> {
       final user = ref.read(currentUserProvider);
       if (user == null) throw Exception('로그인이 필요합니다');
 
+      // 0. 플랜 개수 제한 체크 (활성+대기 최대 5개)
+      final planRepo = ref.read(planRepositoryProvider);
+      final existingPlans = await planRepo.getUserPlans(user.id);
+      final activePlanCount = existingPlans
+          .where((p) => p.status == 'active' || p.status == 'upcoming')
+          .length;
+      if (activePlanCount >= 5) {
+        throw Exception('활성/대기 중인 플랜은 최대 5개까지 가능합니다. 기존 플랜을 완료하거나 취소해주세요.');
+      }
+
       // 1. VDOT 산출
       // 우선순위: 목표 시간 → 대회 기록 → 경험 기반 기본값
       setState(() => _statusMessage = 'VDOT 분석 중...');
@@ -158,7 +168,6 @@ class _PlanCreateScreenState extends ConsumerState<PlanCreateScreen> {
 
       // 6. DB 저장
       setState(() => _statusMessage = '훈련표를 저장하고 있습니다...');
-      final planRepo = ref.read(planRepositoryProvider);
 
       // 기존 활성 플랜 비활성화
       final existingPlan = await planRepo.getActivePlan(user.id);

@@ -9,6 +9,9 @@ import 'auth/splash_screen.dart';
 import 'common/layouts/main_tab_layout.dart';
 import 'home/home_screen.dart';
 import 'my/my_page_screen.dart';
+import 'my/plan_management_screen.dart';
+import 'my/race_records_screen.dart';
+import 'my/settings_screen.dart';
 import 'onboarding/data_connection_screen.dart';
 import 'onboarding/goal_setting_screen.dart';
 import 'onboarding/profile_setup_screen.dart';
@@ -175,6 +178,24 @@ final routerProvider = Provider<GoRouter>((ref) {
           final planId = state.pathParameters['planId']!;
           return PlanDetailScreen(planId: planId);
         },
+      ),
+      // D-6 내 플랜 관리
+      GoRoute(
+        path: '/my/plans',
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (context, state) => const PlanManagementScreen(),
+      ),
+      // D-7 대회 기록 관리
+      GoRoute(
+        path: '/my/race-records',
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (context, state) => const RaceRecordsScreen(),
+      ),
+      // D-8 설정
+      GoRoute(
+        path: '/my/settings',
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (context, state) => const SettingsScreen(),
       ),
       // D-2 운동 기록 상세
       GoRoute(

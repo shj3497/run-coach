@@ -31,14 +31,20 @@ class PlanScreen extends ConsumerWidget {
     }
 
     if (!planState.hasPlan) {
-      return _buildEmptyState(context);
+      return _buildEmptyState(context, ref);
     }
 
     return _buildPlanContent(context, ref, planState);
   }
 
   /// 플랜이 없을 때 빈 상태
-  Widget _buildEmptyState(BuildContext context) {
+  Widget _buildEmptyState(BuildContext context, WidgetRef ref) {
+    final plansAsync = ref.watch(userPlansProvider);
+    final hasExistingPlans = plansAsync.whenOrNull(
+          data: (plans) => plans.isNotEmpty,
+        ) ??
+        false;
+
     return Scaffold(
       backgroundColor: AppColors.background(context),
       appBar: AppBar(
@@ -63,14 +69,18 @@ class PlanScreen extends ConsumerWidget {
               ),
               const SizedBox(height: AppSpacing.xl),
               Text(
-                '아직 생성된 훈련표가 없습니다',
+                hasExistingPlans
+                    ? '활성 플랜이 없습니다'
+                    : '아직 생성된 훈련표가 없습니다',
                 style: AppTypography.h2.copyWith(
                   color: AppColors.textPrimary(context),
                 ),
               ),
               const SizedBox(height: AppSpacing.sm),
               Text(
-                'AI가 맞춤 훈련 플랜을 만들어 드립니다',
+                hasExistingPlans
+                    ? '기존 플랜을 다시 활성화하거나 새 플랜을 만들어 보세요'
+                    : 'AI가 맞춤 훈련 플랜을 만들어 드립니다',
                 style: AppTypography.body.copyWith(
                   color: AppColors.textSecondary,
                 ),
@@ -96,6 +106,30 @@ class PlanScreen extends ConsumerWidget {
                   ),
                 ),
               ),
+              if (hasExistingPlans) ...[
+                const SizedBox(height: AppSpacing.md),
+                SizedBox(
+                  width: double.infinity,
+                  height: 50,
+                  child: OutlinedButton(
+                    onPressed: () => _showPlanSelector(context, ref),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.primary(context),
+                      side: BorderSide(color: AppColors.primary(context)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius:
+                            BorderRadius.circular(AppSpacing.buttonRadius),
+                      ),
+                    ),
+                    child: Text(
+                      '기존 플랜 보기',
+                      style: AppTypography.h3.copyWith(
+                        color: AppColors.primary(context),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -139,65 +173,38 @@ class PlanScreen extends ConsumerWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // 플랜 이름 + 상태 (드롭다운 트리거)
+              // 플랜 이름 (드롭다운 트리거)
               Padding(
                 padding: const EdgeInsets.symmetric(
                   horizontal: AppSpacing.screenPadding,
                 ),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: InkWell(
-                          onTap: () => _showPlanSelector(context, ref),
-                          borderRadius:
-                              BorderRadius.circular(AppSpacing.cardRadius),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 4),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Flexible(
-                                  child: Text(
-                                    plan.planName,
-                                    style: AppTypography.bodyLarge.copyWith(
-                                      color: AppColors.textPrimary(context),
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                                const SizedBox(width: 4),
-                                const Icon(
-                                  Icons.keyboard_arrow_down,
-                                  size: 20,
-                                  color: AppColors.textSecondary,
-                                ),
-                              ],
+                child: InkWell(
+                  onTap: () => _showPlanSelector(context, ref),
+                  borderRadius:
+                      BorderRadius.circular(AppSpacing.cardRadius),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            plan.planName,
+                            style: AppTypography.bodyLarge.copyWith(
+                              color: AppColors.textPrimary(context),
+                              fontWeight: FontWeight.w600,
                             ),
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 4,
+                        const SizedBox(width: 4),
+                        const Icon(
+                          Icons.keyboard_arrow_down,
+                          size: 20,
+                          color: AppColors.textSecondary,
                         ),
-                        decoration: BoxDecoration(
-                          color: AppColors.success.withValues(alpha: 0.15),
-                          borderRadius:
-                              BorderRadius.circular(AppSpacing.badgeRadius),
-                        ),
-                        child: Text(
-                          '활성',
-                          style: AppTypography.bodySmall.copyWith(
-                            color: AppColors.success,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -215,14 +222,11 @@ class PlanScreen extends ConsumerWidget {
                   ),
                   child: Column(
                     children: currentWeek.sessions.map((session) {
-                      // dayOfWeek: 1=월 ~ 7=일, startDate는 월요일
-                      final sessionDate = currentWeek.startDate
-                          .add(Duration(days: session.dayOfWeek - 1));
                       return Padding(
                         padding:
                             const EdgeInsets.only(bottom: AppSpacing.sm),
                         child: _buildDaySessionRow(
-                            context, session, sessionDate),
+                            context, session, session.sessionDate),
                       );
                     }).toList(),
                   ),
@@ -480,13 +484,16 @@ class PlanScreen extends ConsumerWidget {
     }
   }
 
-  /// 플랜 선택 Bottom Sheet
+  /// 플랜 선택 Bottom Sheet (active + upcoming만 표시)
   void _showPlanSelector(BuildContext context, WidgetRef ref) {
     final plansAsync = ref.read(userPlansProvider);
     final activePlanId = ref.read(planProvider).activePlan?.id;
 
     plansAsync.when(
-      data: (plans) {
+      data: (allPlans) {
+        final plans = allPlans
+            .where((p) => p.status == 'active' || p.status == 'upcoming')
+            .toList();
         if (plans.isEmpty) return;
         showModalBottomSheet(
           context: context,
@@ -499,12 +506,12 @@ class PlanScreen extends ConsumerWidget {
           builder: (sheetContext) => _PlanSelectorSheet(
             plans: plans,
             activePlanId: activePlanId,
-            onSelect: (planId) async {
+            onSelect: (plan) async {
               Navigator.of(sheetContext).pop();
-              if (planId != activePlanId) {
+              if (plan.id != activePlanId) {
                 await ref
                     .read(planProvider.notifier)
-                    .switchActivePlan(planId);
+                    .switchActivePlan(plan.id);
                 ref.invalidate(userPlansProvider);
                 ref.invalidate(activePlanProvider);
                 ref.invalidate(homeStateProvider);
@@ -532,7 +539,7 @@ class PlanScreen extends ConsumerWidget {
 class _PlanSelectorSheet extends StatelessWidget {
   final List<TrainingPlan> plans;
   final String? activePlanId;
-  final ValueChanged<String> onSelect;
+  final ValueChanged<TrainingPlan> onSelect;
 
   const _PlanSelectorSheet({
     required this.plans,
@@ -592,7 +599,7 @@ class _PlanSelectorSheet extends StatelessWidget {
     final statusInfo = _getStatusInfo(plan.status);
 
     return InkWell(
-      onTap: () => onSelect(plan.id),
+      onTap: () => onSelect(plan),
       child: Padding(
         padding: const EdgeInsets.symmetric(
           horizontal: AppSpacing.screenPadding,
@@ -695,6 +702,8 @@ class _PlanSelectorSheet extends StatelessWidget {
         return (color: AppColors.success, label: '활성');
       case 'completed':
         return (color: AppColors.textSecondary, label: '완료');
+      case 'cancelled':
+        return (color: AppColors.warning, label: '취소');
       default: // upcoming
         return (color: AppColors.primaryLight, label: '대기');
     }

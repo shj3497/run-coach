@@ -319,8 +319,14 @@ class GenerateTrainingPlan {
     final weeks = <TrainingWeek>[];
     final sessions = <TrainingSession>[];
 
+    // startDate를 해당 주의 월요일로 정규화
+    // (예: 금요일 시작 → 그 주 월요일 기준으로 계산)
+    final firstMonday = input.startDate.subtract(
+      Duration(days: input.startDate.weekday - 1),
+    );
+
     for (final weekResponse in parsedResponse.weeks) {
-      final weekStartDate = input.startDate.add(
+      final weekStartDate = firstMonday.add(
         Duration(days: (weekResponse.weekNumber - 1) * 7),
       );
       final weekEndDate = weekStartDate.add(const Duration(days: 6));
@@ -514,8 +520,8 @@ class GenerateTrainingPlanInput {
     if (goalDistanceKm <= 0) {
       errors.add('목표 거리는 0보다 커야 합니다.');
     }
-    if (totalWeeks < 4 || totalWeeks > 52) {
-      errors.add('훈련 기간은 4~52주 범위여야 합니다.');
+    if (totalWeeks < 4 || totalWeeks > 24) {
+      errors.add('훈련 기간은 4~24주 범위여야 합니다.');
     }
     if (trainingDaysPerWeek < 1 || trainingDaysPerWeek > 7) {
       errors.add('주간 훈련일수는 1~7일 범위여야 합니다.');

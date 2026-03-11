@@ -115,6 +115,13 @@ final currentWeatherProvider = FutureProvider<WeatherData?>((ref) async {
 // 활성 플랜 관련
 // -----------------------------------------------------------------------------
 
+/// 플랜 ID로 단일 플랜 조회
+final planByIdProvider =
+    FutureProvider.family<TrainingPlan?, String>((ref, planId) async {
+  final planRepo = ref.watch(planRepositoryProvider);
+  return await planRepo.getPlanById(planId);
+});
+
 /// 현재 사용자의 활성 훈련 플랜
 final activePlanProvider = FutureProvider<TrainingPlan?>((ref) async {
   final user = ref.watch(currentUserProvider);

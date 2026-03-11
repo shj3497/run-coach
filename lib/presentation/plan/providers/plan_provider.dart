@@ -268,12 +268,14 @@ class PlanNotifier extends StateNotifier<PlanScreenState> {
   /// 활성 플랜 전환 (다른 플랜을 active로 설정)
   Future<void> switchActivePlan(String newPlanId) async {
     final currentPlan = state.activePlan;
-    if (currentPlan == null || currentPlan.id == newPlanId) return;
+    if (currentPlan != null && currentPlan.id == newPlanId) return;
 
     state = state.copyWith(isLoading: true);
     try {
-      // 1) 현재 active 플랜 → upcoming (비활성화 먼저)
-      await _planRepo.updatePlanStatus(currentPlan.id, 'upcoming');
+      // 1) 현재 active 플랜이 있으면 → upcoming (비활성화 먼저)
+      if (currentPlan != null) {
+        await _planRepo.updatePlanStatus(currentPlan.id, 'upcoming');
+      }
       // 2) 선택된 플랜 → active
       await _planRepo.updatePlanStatus(newPlanId, 'active');
       // 3) 새 플랜 데이터 로드
@@ -284,6 +286,38 @@ class PlanNotifier extends StateNotifier<PlanScreenState> {
         error: '플랜 전환에 실패했습니다',
       );
     }
+  }
+
+  /// 플랜 완료 처리
+  Future<void> completePlan(String planId) async {
+    await _planRepo.updatePlanStatus(planId, 'completed');
+    await _activateNextPlanOrReload();
+  }
+
+  /// 플랜 취소 처리
+  Future<void> cancelPlan(String planId) async {
+    await _planRepo.updatePlanStatus(planId, 'cancelled');
+    await _activateNextPlanOrReload();
+  }
+
+  /// 플랜 삭제 처리
+  Future<void> deletePlan(String planId) async {
+    await _planRepo.deletePlan(planId);
+    await _activateNextPlanOrReload();
+  }
+
+  /// 대기 중인 플랜이 있으면 자동 활성화, 없으면 빈 상태로 전환
+  Future<void> _activateNextPlanOrReload() async {
+    if (_userId == null) {
+      await _loadRealData();
+      return;
+    }
+    final allPlans = await _planRepo.getUserPlans(_userId);
+    final upcoming = allPlans.where((p) => p.status == 'upcoming').toList();
+    if (upcoming.isNotEmpty) {
+      await _planRepo.updatePlanStatus(upcoming.first.id, 'active');
+    }
+    await _loadRealData();
   }
 
   /// 데이터 새로고침
