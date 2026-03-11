@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:app_links/app_links.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -62,16 +63,21 @@ class StravaAuthNotifier extends StateNotifier<StravaAuthState> {
 
   /// 기존 Strava 연결 확인
   Future<void> _checkExistingConnection() async {
+    debugPrint('[StravaAuth] _checkExistingConnection — userId=$_userId');
     if (_userId == null) return;
     try {
       final connection = await _stravaService.getConnection(_userId);
+      debugPrint(
+          '[StravaAuth] connection found: ${connection != null}, isActive: ${connection?.isActive}');
       if (connection != null && connection.isActive) {
         state = StravaAuthState(
           status: StravaAuthStatus.connected,
           connection: connection,
         );
+        debugPrint('[StravaAuth] → status set to CONNECTED');
       }
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[StravaAuth] _checkExistingConnection ERROR: $e');
       // 확인 실패 시 disconnected 상태 유지
     }
   }

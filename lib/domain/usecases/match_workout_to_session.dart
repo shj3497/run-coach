@@ -257,11 +257,17 @@ class MatchWorkoutToSession {
   /// 날짜 매칭 점수 계산
   ///
   /// 같은 날: 1.0
-  /// +/-1일: 0.5
-  /// +/-2일: 0.2
-  /// 3일 이상: null (매칭 불가)
+  /// 운동이 1일 늦음 (세션이 어제): 0.5
+  /// 운동이 2일 늦음 (세션이 그제): 0.2
+  /// 세션이 미래 (운동보다 뒤): null (매칭 불가)
+  /// 3일 이상 차이: null (매칭 불가)
   double? _calculateDateScore(DateTime workoutDate, DateTime sessionDate) {
-    final dayDifference = _daysBetween(workoutDate, sessionDate).abs();
+    // 양수 = 운동이 세션보다 나중 (세션이 과거)
+    // 음수 = 세션이 운동보다 나중 (세션이 미래)
+    final dayDifference = _daysBetween(workoutDate, sessionDate);
+
+    // 미래 세션에는 매칭 불가 (세션 날짜 > 운동 날짜)
+    if (dayDifference < 0) return null;
 
     switch (dayDifference) {
       case 0:

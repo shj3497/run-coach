@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -222,12 +223,16 @@ class StravaService {
       );
 
       final activities = response.data as List<dynamic>;
+      debugPrint(
+          '[StravaService] Strava API returned ${activities.length} total activities');
 
       // 러닝 Activity만 필터링하여 WorkoutLog로 변환
       final workoutLogs = <WorkoutLog>[];
       for (final activity in activities) {
         final activityMap = activity as Map<String, dynamic>;
         final type = activityMap['type'] as String?;
+        debugPrint(
+            '[StravaService] activity: id=${activityMap['id']}, type=$type, start=${activityMap['start_date_local']}');
 
         if (type == 'Run' || type == 'VirtualRun') {
           final log = _convertActivityToWorkoutLog(
@@ -255,7 +260,8 @@ class StravaService {
   /// 마지막 동기화 이후의 새로운 Activity를 가져옵니다.
   ///
   /// strava_connections 테이블의 last_sync_at을 기준으로 합니다.
-  /// 동기화 완료 후 last_sync_at을 업데이트합니다.
+  /// [updateSyncTime]이 true이면 동기화 시간을 업데이트합니다.
+  /// 호출부에서 워크아웃 저장 성공 후 [markSyncComplete]를 호출해야 합니다.
   Future<List<WorkoutLog>> getNewActivitiesSince({
     required String userId,
   }) async {
@@ -264,18 +270,35 @@ class StravaService {
       throw const StravaServiceException('Strava 연결 정보를 찾을 수 없습니다.');
     }
 
-    final after = connection.lastSyncAt ??
-        DateTime.now().subtract(const Duration(days: 30));
+    // last_sync_at에서 1일을 빼서 겹침 버퍼를 둠
+    // → 동기화 타이밍 차이로 누락되는 활동 방지
+    final rawSyncAt = connection.lastSyncAt;
+    final after = rawSyncAt != null
+        ? rawSyncAt.subtract(const Duration(days: 1))
+        : DateTime.now().subtract(const Duration(days: 30));
+
+    debugPrint('[StravaService] last_sync_at=$rawSyncAt');
+    debugPrint(
+        '[StravaService] fetching activities after=$after (with 1-day overlap, epoch=${after.millisecondsSinceEpoch ~/ 1000})');
 
     final workoutLogs = await getActivities(
       userId: userId,
       after: after,
     );
 
-    // 동기화 시간 업데이트
-    await _updateLastSyncAt(connection.id);
-
+    debugPrint(
+        '[StravaService] API returned ${workoutLogs.length} running activities');
     return workoutLogs;
+  }
+
+  /// 동기화 완료 후 last_sync_at 업데이트
+  ///
+  /// 워크아웃 저장 성공 후 호출해야 합니다.
+  Future<void> markSyncComplete(String userId) async {
+    final connection = await getConnection(userId);
+    if (connection != null) {
+      await _updateLastSyncAt(connection.id);
+    }
   }
 
   /// 특정 Activity의 상세 정보를 가져옵니다.

@@ -117,7 +117,9 @@ class _RecordsScreenState extends ConsumerState<RecordsScreen> {
 
   /// Pull-to-refresh: Strava 강제 동기화 + 데이터 새로고침
   Future<void> _onRefresh() async {
+    debugPrint('[Records] _onRefresh called');
     await ref.read(stravaSyncProvider.notifier).forceSync();
+    debugPrint('[Records] forceSync completed');
     ref.invalidate(monthlySummaryProvider);
     ref.invalidate(workoutRecordsProvider);
   }

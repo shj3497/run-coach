@@ -81,11 +81,11 @@ class ProcessWorkoutUseCase {
       );
     }
 
-    // 4. 매칭 후보 세션 조회 (운동 날짜 기준 +/- 2일 범위)
+    // 4. 매칭 후보 세션 조회 (운동 날짜 기준 -2일 ~ 같은 날)
+    // 미래 세션에는 매칭하지 않음 (연쇄 밀림 방지)
     final searchStartDate =
         savedWorkout.workoutDate.subtract(const Duration(days: 2));
-    final searchEndDate =
-        savedWorkout.workoutDate.add(const Duration(days: 2));
+    final searchEndDate = savedWorkout.workoutDate;
 
     final candidateSessions = await _planRepository.getSessionsByDateRange(
       activePlan.id,
@@ -223,7 +223,7 @@ class ProcessWorkoutUseCase {
     final allDates = savedWorkouts.map((w) => w.workoutDate).toList();
     allDates.sort();
     final searchStartDate = allDates.first.subtract(const Duration(days: 2));
-    final searchEndDate = allDates.last.add(const Duration(days: 2));
+    final searchEndDate = allDates.last; // 미래 세션 매칭 방지
 
     // 매칭 후보 세션 한번에 조회
     final candidateSessions = await _planRepository.getSessionsByDateRange(
