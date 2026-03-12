@@ -11,6 +11,8 @@ import 'home/home_screen.dart';
 import 'my/my_page_screen.dart';
 import 'my/plan_management_screen.dart';
 import 'my/race_records_screen.dart';
+import 'my/notification_settings_screen.dart';
+import 'my/profile_edit_screen.dart';
 import 'my/settings_screen.dart';
 import 'onboarding/data_connection_screen.dart';
 import 'onboarding/goal_setting_screen.dart';
@@ -196,6 +198,18 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/my/settings',
         parentNavigatorKey: _rootNavigatorKey,
         builder: (context, state) => const SettingsScreen(),
+      ),
+      // 프로필 수정
+      GoRoute(
+        path: '/my/profile-edit',
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (context, state) => const ProfileEditScreen(),
+      ),
+      // 알림 설정
+      GoRoute(
+        path: '/my/notification-settings',
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (context, state) => const NotificationSettingsScreen(),
       ),
       // D-2 운동 기록 상세
       GoRoute(

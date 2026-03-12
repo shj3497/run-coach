@@ -13,6 +13,7 @@ import '../onboarding/widgets/day_selector.dart';
 import '../onboarding/widgets/distance_selector.dart';
 import '../onboarding/widgets/time_picker_field.dart';
 import '../providers/data_providers.dart';
+import '../../domain/usecases/schedule_notifications.dart';
 import 'providers/plan_provider.dart';
 
 /// D-5 플랜 생성 화면
@@ -204,6 +205,9 @@ class _PlanCreateScreenState extends ConsumerState<PlanCreateScreen> {
       // planProvider 새로고침
       ref.read(planProvider.notifier).refresh();
       ref.invalidate(activePlanProvider);
+
+      // 알림 스케줄링
+      await scheduleNotificationsIfEnabled(ref);
 
       if (mounted) {
         setState(() {

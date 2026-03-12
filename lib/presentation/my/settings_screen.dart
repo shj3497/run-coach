@@ -82,9 +82,7 @@ class SettingsScreen extends ConsumerWidget {
                     size: 20,
                     color: AppColors.textSecondary,
                   ),
-                  onTap: () {
-                    // placeholder
-                  },
+                  onTap: () => context.push('/my/notification-settings'),
                 ),
               ]),
 
@@ -102,9 +100,7 @@ class SettingsScreen extends ConsumerWidget {
                     size: 20,
                     color: AppColors.textSecondary,
                   ),
-                  onTap: () {
-                    // placeholder
-                  },
+                  onTap: () => context.push('/my/profile-edit'),
                 ),
                 _buildDivider(context),
                 _buildMenuRow(

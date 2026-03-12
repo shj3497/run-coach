@@ -3,9 +3,11 @@ import '../../../core/constants/training_zones.dart';
 import '../../../data/models/training_plan.dart' as db;
 import '../../../data/models/training_session.dart';
 import '../../../data/repositories/plan_repository.dart';
+import '../../../data/services/notification_service.dart';
 import '../../auth/providers/auth_providers.dart';
 import '../../common/widgets/training_session_card.dart';
 import '../../providers/data_providers.dart';
+import '../../providers/notification_provider.dart';
 
 // ─── UI View Models ───
 
@@ -144,12 +146,18 @@ class PlanScreenState {
 class PlanNotifier extends StateNotifier<PlanScreenState> {
   final PlanRepository _planRepo;
   final String? _userId;
+  final NotificationService _notificationService;
+  final NotificationSettings _notificationSettings;
 
   PlanNotifier({
     required PlanRepository planRepo,
     required String? userId,
+    required NotificationService notificationService,
+    required NotificationSettings notificationSettings,
   })  : _planRepo = planRepo,
         _userId = userId,
+        _notificationService = notificationService,
+        _notificationSettings = notificationSettings,
         super(const PlanScreenState(isLoading: true)) {
     _loadRealData();
   }
@@ -265,6 +273,27 @@ class PlanNotifier extends StateNotifier<PlanScreenState> {
     }
   }
 
+  /// 알림 재스케줄링 (알림 활성 상태일 때만)
+  Future<void> _rescheduleNotifications() async {
+    if (!_notificationSettings.enabled || _userId == null) return;
+    final plan = await _planRepo.getActivePlan(_userId);
+    if (plan == null) {
+      await _notificationService.cancelAll();
+      return;
+    }
+    final weeks = await _planRepo.getWeeksByPlan(plan.id);
+    final allSessions = <TrainingSession>[];
+    for (final w in weeks) {
+      allSessions.addAll(await _planRepo.getSessionsByWeek(w.id));
+    }
+    await _notificationService.cancelAll();
+    await _notificationService.scheduleForPlan(
+      sessions: allSessions,
+      hour: _notificationSettings.hour,
+      minute: _notificationSettings.minute,
+    );
+  }
+
   /// 활성 플랜 전환 (다른 플랜을 active로 설정)
   Future<void> switchActivePlan(String newPlanId) async {
     final currentPlan = state.activePlan;
@@ -280,6 +309,8 @@ class PlanNotifier extends StateNotifier<PlanScreenState> {
       await _planRepo.updatePlanStatus(newPlanId, 'active');
       // 3) 새 플랜 데이터 로드
       await _loadRealData();
+      // 4) 알림 재스케줄링
+      await _rescheduleNotifications();
     } catch (e) {
       state = state.copyWith(
         isLoading: false,
@@ -292,18 +323,21 @@ class PlanNotifier extends StateNotifier<PlanScreenState> {
   Future<void> completePlan(String planId) async {
     await _planRepo.updatePlanStatus(planId, 'completed');
     await _activateNextPlanOrReload();
+    await _rescheduleNotifications();
   }
 
   /// 플랜 취소 처리
   Future<void> cancelPlan(String planId) async {
     await _planRepo.updatePlanStatus(planId, 'cancelled');
     await _activateNextPlanOrReload();
+    await _rescheduleNotifications();
   }
 
   /// 플랜 삭제 처리
   Future<void> deletePlan(String planId) async {
     await _planRepo.deletePlan(planId);
     await _activateNextPlanOrReload();
+    await _rescheduleNotifications();
   }
 
   /// 대기 중인 플랜이 있으면 자동 활성화, 없으면 빈 상태로 전환
@@ -352,6 +386,8 @@ final planProvider =
   return PlanNotifier(
     planRepo: ref.watch(planRepositoryProvider),
     userId: ref.watch(currentUserProvider)?.id,
+    notificationService: ref.watch(notificationServiceProvider),
+    notificationSettings: ref.watch(notificationSettingsProvider),
   );
 });
 
